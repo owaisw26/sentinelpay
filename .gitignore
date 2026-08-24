@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+
+# IntelliJ / IDE
+.idea/
+*.iml
+.vscode/
+
+# Java / Maven
+payments-service/target/
+*.log
+
+# Python
+fraud-service/.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node / Vite
+dashboard/node_modules/
+dashboard/dist/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Misc
+coverage/
