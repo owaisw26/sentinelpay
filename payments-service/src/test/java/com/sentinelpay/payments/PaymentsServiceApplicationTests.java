@@ -1,4 +1,4 @@
-package com.sentinelpay.payments_service;
+package com.sentinelpay.payments;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

@@ -1,4 +1,4 @@
-package com.sentinelpay.payments_service;
+package com.sentinelpay.payments;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
