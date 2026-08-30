@@ -35,4 +35,22 @@ public class GlobalExceptionHandler {
             "message", exception.getMessage()
         );
     }
+
+    @ExceptionHandler(WalletInsufficientBalanceException.class)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
+    public Map<String, String> handleWalletInsufficientBalance(WalletInsufficientBalanceException exception) {
+        return Map.of(
+            "error", "WALLET_INSUFFICIENT_BALANCE",
+            "message", exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(InvalidTransferException.class)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
+    public Map<String, String> handleWalletsHaveDifferentCurrencyException(InvalidTransferException exception) {
+        return Map.of(
+            "error", "DIFFERENT_WALLET_CURRENCY_NOT_ALLOWED",
+            "message", exception.getMessage()
+        );
+    }
 }

@@ -65,4 +65,8 @@ public class Wallet {
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
+
+    public void setBalance(BigDecimal balance) {
+        this.balance = balance;
+    }
 }
