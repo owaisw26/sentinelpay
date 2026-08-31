@@ -52,4 +52,9 @@ public class WalletService {
             throw new WalletUnauthorizedAccess(userId);
         }
     }
+
+    public Wallet getWallet(UUID walletId) {
+        Wallet wallet = walletRepository.findById(walletId).orElseThrow(() -> new WalletNotFoundException(walletId));
+        return wallet;
+    }
 }

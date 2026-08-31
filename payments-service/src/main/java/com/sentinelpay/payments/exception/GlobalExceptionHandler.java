@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+
 @RestControllerAdvice
 public class GlobalExceptionHandler {
     @ExceptionHandler(WalletNotFoundException.class)
@@ -50,6 +51,42 @@ public class GlobalExceptionHandler {
     public Map<String, String> handleWalletsHaveDifferentCurrencyException(InvalidTransferException exception) {
         return Map.of(
             "error", "DIFFERENT_WALLET_CURRENCY_NOT_ALLOWED",
+            "message", exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(PaymentAlreadyExistsException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> handlePaymentAlreadyExists(PaymentAlreadyExistsException exception) {
+        return Map.of(
+            "error", "PAYMENT_ALREADY_EXISTS",
+            "message", exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(InvalidPaymentTransition.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> handlePaymentAlreadyExists(InvalidPaymentTransition exception) {
+        return Map.of(
+            "error", "INVALID_PAYMENT_TRANSITION",
+            "message", exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(PaymentNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Map<String, String> handlePaymentNotFound(PaymentNotFoundException exception) {
+        return Map.of(
+            "error", "PAYMENT_NOT_FOUND",
+            "message", exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(PaymentUnauthorizedAccess.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Map<String, String> handlePaymentUnauthorized(PaymentUnauthorizedAccess exception) {
+        return Map.of(
+            "error", "PAYMENT_ACCESS_DENIED",
             "message", exception.getMessage()
         );
     }
