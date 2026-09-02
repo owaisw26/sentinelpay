@@ -10,9 +10,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.sentinelpay.payments.controller.RequestSchema.TransferRequest;
-import com.sentinelpay.payments.controller.RequestSchema.WalletRequest;
-import com.sentinelpay.payments.controller.ResponseSchema.WalletResponse;
+import com.sentinelpay.payments.controller.request.TransferRequest;
+import com.sentinelpay.payments.controller.request.WalletRequest;
+import com.sentinelpay.payments.controller.response.WalletResponse;
 import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.service.LedgerService;
 import com.sentinelpay.payments.service.WalletService;

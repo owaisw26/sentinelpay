@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.sentinelpay.payments.controller.RequestSchema.UserRequest;
+import com.sentinelpay.payments.controller.request.UserRequest;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.service.UserService;
 

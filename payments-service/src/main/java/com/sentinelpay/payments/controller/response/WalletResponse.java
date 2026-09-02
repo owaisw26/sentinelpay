@@ -1,4 +1,4 @@
-package com.sentinelpay.payments.controller.ResponseSchema;
+package com.sentinelpay.payments.controller.response;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;

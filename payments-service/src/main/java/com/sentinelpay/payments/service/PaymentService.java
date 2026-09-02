@@ -8,9 +8,11 @@ import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.UUID;
+import tools.jackson.databind.ObjectMapper;
 
 import org.springframework.stereotype.Service;
 
+import com.sentinelpay.payments.domain.OutboxEvent;
 import com.sentinelpay.payments.domain.Payment;
 import com.sentinelpay.payments.domain.PaymentStatus;
 import com.sentinelpay.payments.domain.Wallet;
@@ -18,21 +20,40 @@ import com.sentinelpay.payments.exception.PaymentAlreadyExistsException;
 import com.sentinelpay.payments.exception.PaymentNotFoundException;
 import com.sentinelpay.payments.exception.PaymentUnauthorizedAccess;
 import com.sentinelpay.payments.exception.WalletUnauthorizedAccess;
+import com.sentinelpay.payments.repository.OutboxEventRepository;
 import com.sentinelpay.payments.repository.PaymentRepository;
+import com.sentinelpay.payments.service.outbox.PaymentCreatedEvent;
+
+import jakarta.transaction.Transactional;
+import tools.jackson.databind.JsonNode;
 
 @Service
 public class PaymentService {
-    private PaymentRepository paymentRepository;
+    private final PaymentRepository paymentRepository;
+    private final OutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
 
-    private WalletService walletService;
+    private final WalletService walletService;
 
-    public PaymentService(PaymentRepository paymentRepository, WalletService walletService) {
+    public PaymentService(PaymentRepository paymentRepository,
+                          WalletService walletService,
+                          OutboxEventRepository outboxEventRepository,
+                          ObjectMapper objectMapper) {
         this.paymentRepository = paymentRepository;
         this.walletService = walletService;
+        this.outboxEventRepository = outboxEventRepository;
+        this.objectMapper = objectMapper;
     }
 
     // responsible for creating the payment
-    public Payment createPayment(UUID userId, UUID senderWalletId, UUID receiverWalletId, BigDecimal amount, String currency, String reference, UUID idempotency_key) {
+    @Transactional
+    public Payment createPayment(UUID userId,
+                                 UUID senderWalletId,
+                                 UUID receiverWalletId,
+                                 BigDecimal amount,
+                                 String currency,
+                                 String reference, UUID
+                                 idempotency_key) {
         Wallet sender = walletService.getWallet(senderWalletId);
         Wallet receiver = walletService.getWallet(receiverWalletId);
         
@@ -52,7 +73,9 @@ public class PaymentService {
         String requestHash = hashContent(requestContent);
 
         // verify this payment doesn't exist already
-        Payment potentialPayment = paymentRepository.findByIdempotencyKey(idempotency_key).orElse(null);
+        Payment potentialPayment = paymentRepository.
+                                   findByIdempotencyKey(idempotency_key).
+                                   orElse(null);
 
         if (potentialPayment != null) {
             if (!potentialPayment.getRequestHash().equals(requestHash)) {
@@ -64,11 +87,39 @@ public class PaymentService {
         UUID paymentId = UUID.randomUUID();
 
         // user owns the sender wallet, can create payment
-        Payment payment = new Payment(paymentId, 1, sender, receiver, amount, currency, reference, PaymentStatus.CREATED, idempotency_key, requestHash, LocalDateTime.now(), LocalDateTime.now());
+        Payment payment = new Payment(paymentId,
+                             1,
+                                      sender,
+                                      receiver,
+                                      amount,
+                                      currency,
+                                      reference,
+                                      PaymentStatus.CREATED,
+                                      idempotency_key,
+                                      requestHash,
+                                      LocalDateTime.now(),
+                                      LocalDateTime.now());
 
-        paymentRepository.save(payment);
+        // save the payment and create an event
+        Payment savedPayment = paymentRepository.save(payment);
 
-        return payment;
+        PaymentCreatedEvent payloadObject = new PaymentCreatedEvent(
+                                                savedPayment.getId(),
+                                                savedPayment.getSenderWallet().getId(),
+                                                savedPayment.getReceiverWallet().getId(),
+                                                savedPayment.getAmount(),
+                                                savedPayment.getCurrency());
+
+        JsonNode payload = objectMapper.valueToTree(payloadObject);
+
+        // create an outbox event, id is alr taken care in the entity
+        UUID correlationId = UUID.randomUUID();
+        OutboxEvent event = new OutboxEvent(savedPayment.getId(),
+                                  "PAYMENT_CREATED", payload, correlationId);
+
+        outboxEventRepository.save(event);
+
+        return savedPayment;
     }
 
     public Payment fetchPayment(UUID userId, UUID paymentId) {

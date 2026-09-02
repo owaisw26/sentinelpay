@@ -1,4 +1,4 @@
-package com.sentinelpay.payments.controller.RequestSchema;
+package com.sentinelpay.payments.controller.request;
 
 import java.math.BigDecimal;
 import java.util.UUID;

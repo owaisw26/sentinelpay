@@ -1,4 +1,4 @@
-package com.sentinelpay.payments.controller.RequestSchema;
+package com.sentinelpay.payments.controller.request;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
