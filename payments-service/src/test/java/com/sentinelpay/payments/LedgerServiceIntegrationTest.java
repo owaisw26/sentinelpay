@@ -32,7 +32,7 @@ import jakarta.transaction.Transactional;
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
-public class LedgerServiceIntegrationTest {
+public class LedgerServiceIntegrationTest extends AbstractIntegrationTest {
       @Autowired
     private MockMvc mockMvc;
 

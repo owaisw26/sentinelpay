@@ -2,7 +2,6 @@ package com.sentinelpay.payments;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -12,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.fail;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
-import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -22,8 +20,13 @@ import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,8 +35,6 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 import com.sentinelpay.payments.domain.OutboxEvent;
 import com.sentinelpay.payments.domain.Payment;
@@ -44,6 +45,7 @@ import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.provider.FakePaymentProvider;
 import com.sentinelpay.payments.provider.PaymentProviderResponse;
 import com.sentinelpay.payments.provider.PaymentProviderTimeoutException;
+import com.sentinelpay.payments.exception.ProviderAttemptInProgressException;
 import com.sentinelpay.payments.repository.OutboxEventRepository;
 import com.sentinelpay.payments.repository.PaymentRepository;
 import com.sentinelpay.payments.repository.PaymentReservationRepository;
@@ -61,9 +63,6 @@ import com.sentinelpay.payments.service.outbox.PaymentEventProcessor;
 import com.sentinelpay.payments.service.outbox.PaymentProcessingService;
 
 import jakarta.transaction.Transactional;
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
@@ -81,23 +80,10 @@ import tools.jackson.databind.ObjectMapper;
 @AutoConfigureMockMvc
 @Transactional
 @Import(OutboxPublisherIntegrationTests.FaultInjectingSqsConfig.class)
-public class OutboxPublisherIntegrationTests {
-    private static final SqsClient QUEUE_ADMIN = createLocalStackClient();
+public class OutboxPublisherIntegrationTests extends AbstractIntegrationTest {
+    private static final SqsClient QUEUE_ADMIN = newSqsClient();
 
-    private static final String TEST_QUEUE_URL = createTestQueue();
-
-    @DynamicPropertySource
-    static void configureTestQueue(DynamicPropertyRegistry registry) {
-        registry.add(
-            "sentinelpay.sqs.payment-events-url",
-            () -> TEST_QUEUE_URL
-        );
-    }
-
-    @AfterAll
-    static void closeQueueAdmin() {
-        QUEUE_ADMIN.close();
-    }
+    private static final String TEST_QUEUE_URL = paymentQueueUrl();
 
     @Autowired
     private OutboxEventRepository outboxEventRepository;
@@ -426,14 +412,7 @@ public class OutboxPublisherIntegrationTests {
                 timeoutQueueUrl
             );
 
-            RuntimeException firstAttempt = assertThrows(
-                RuntimeException.class,
-                timeoutConsumer::poll
-            );
-            assertInstanceOf(
-                PaymentProviderTimeoutException.class,
-                firstAttempt.getCause()
-            );
+            timeoutConsumer.poll();
 
             Payment afterFirstAttempt = paymentRepository
                 .findById(payment.getId())
@@ -442,13 +421,11 @@ public class OutboxPublisherIntegrationTests {
             assertEquals(idempotencyKey, afterFirstAttempt.getIdempotencyKey());
             assertFalse(processedEventRepository.existsById(event.getId()));
 
-            RuntimeException retryAttempt = awaitConsumerFailure(
+            awaitConsumerAttempts(
                 timeoutConsumer,
+                timeoutProvider,
+                2,
                 Duration.ofSeconds(5)
-            );
-            assertInstanceOf(
-                PaymentProviderTimeoutException.class,
-                retryAttempt.getCause()
             );
 
             assertTrue(timeoutProvider.paymentIds.size() >= 2);
@@ -478,6 +455,84 @@ public class OutboxPublisherIntegrationTests {
                     .queueUrl(timeoutDlqUrl)
                     .build()
             );
+            deleteCommittedTestData(
+                event.getId(),
+                payment.getId(),
+                sender,
+                receiver,
+                initiatingUser,
+                receivingUser
+            );
+        }
+    }
+
+    @Test
+    @Transactional(Transactional.TxType.NOT_SUPPORTED)
+    void concurrentDeliveriesCreateOneProviderOperation() throws Exception {
+        User initiatingUser = userService.createUser(
+            "Concurrent Initiator",
+            "CUSTOMER"
+        );
+        User receivingUser = userService.createUser(
+            "Concurrent Receiver",
+            "CUSTOMER"
+        );
+        Wallet sender = walletService.createWallet(
+            initiatingUser.getUserId(),
+            "AUD"
+        );
+        Wallet receiver = walletService.createWallet(
+            receivingUser.getUserId(),
+            "AUD"
+        );
+        fund(sender);
+        Payment payment = paymentService.createPayment(
+            initiatingUser.getUserId(),
+            sender.getId(),
+            receiver.getId(),
+            new BigDecimal("10.00"),
+            "AUD",
+            "concurrent-delivery",
+            UUID.randomUUID()
+        );
+        OutboxEvent event = outboxEventRepository
+            .findOutboxEventsByAggregateId(payment.getId())
+            .getFirst();
+        OutboxMessage message = new OutboxMessage(
+            event.getId(),
+            event.getAggregateId(),
+            event.getEventType(),
+            event.getCorrelationId(),
+            event.getCreatedAt(),
+            event.getPayload()
+        );
+        BlockingPaymentProvider provider = new BlockingPaymentProvider();
+        PaymentEventProcessor processor = new PaymentEventProcessor(
+            paymentProcessingService,
+            provider
+        );
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> first = executor.submit(() -> processor.process(message));
+            assertTrue(provider.awaitFirstCall(Duration.ofSeconds(5)));
+
+            Future<?> duplicate = executor.submit(() -> processor.process(message));
+            ExecutionException duplicateFailure = assertThrows(
+                ExecutionException.class,
+                () -> duplicate.get(5, TimeUnit.SECONDS)
+            );
+            assertTrue(
+                duplicateFailure.getCause()
+                    instanceof ProviderAttemptInProgressException
+            );
+
+            provider.releaseFirstCall();
+            first.get(5, TimeUnit.SECONDS);
+
+            assertEquals(1, provider.callCount());
+            assertTrue(processedEventRepository.existsById(event.getId()));
+        } finally {
+            provider.releaseFirstCall();
             deleteCommittedTestData(
                 event.getId(),
                 payment.getId(),
@@ -615,7 +670,15 @@ public class OutboxPublisherIntegrationTests {
 
             sqsFailureControl.restorePublishing();
 
-            outboxPublisher.publishBatch();
+            awaitCondition(
+                () -> {
+                    outboxPublisher.publishBatch();
+                    return outboxEventRepository.findById(event.getId())
+                        .map(candidate -> candidate.getPublishedAt() != null)
+                        .orElse(false);
+                },
+                Duration.ofSeconds(2)
+            );
 
             OutboxEvent publishedEvent = outboxEventRepository
                 .findById(event.getId())
@@ -772,46 +835,28 @@ public class OutboxPublisherIntegrationTests {
         );
     }
 
-    private static String createTestQueue() {
-        return QUEUE_ADMIN.createQueue(
-            CreateQueueRequest.builder()
-                .queueName(
-                    "payment-events-integration-tests-" + UUID.randomUUID()
-                )
-                .build()
-        ).queueUrl();
-    }
-
     private static SqsClient createLocalStackClient() {
-        return SqsClient.builder()
-            .endpointOverride(URI.create("http://localhost:4566"))
-            .region(Region.AP_SOUTHEAST_2)
-            .credentialsProvider(
-                StaticCredentialsProvider.create(
-                    AwsBasicCredentials.create("test", "test")
-                )
-            )
-            .build();
+        return newSqsClient();
     }
 
-    private RuntimeException awaitConsumerFailure(
+    private void awaitConsumerAttempts(
         PaymentEventConsumer consumer,
+        RecordingTimeoutPaymentProvider provider,
+        int expectedAttempts,
         Duration timeout
     ) throws InterruptedException {
         Instant deadline = Instant.now().plus(timeout);
 
         while (Instant.now().isBefore(deadline)) {
-            try {
-                consumer.poll();
-            } catch (RuntimeException exception) {
-                return exception;
+            consumer.poll();
+            if (provider.paymentIds.size() >= expectedAttempts) {
+                return;
             }
-
-            Thread.sleep(100);
         }
 
         throw new AssertionError(
-            "SQS message was not retried within " + timeout
+            "SQS message did not reach " + expectedAttempts
+                + " attempts within " + timeout
         );
     }
 
@@ -837,6 +882,49 @@ public class OutboxPublisherIntegrationTests {
             paymentIds.add(payment.getId());
             idempotencyKeys.add(providerIdempotencyKey);
             return super.processPayment(payment, providerIdempotencyKey);
+        }
+    }
+
+    private static final class BlockingPaymentProvider
+        extends FakePaymentProvider {
+        private final java.util.concurrent.atomic.AtomicInteger calls =
+            new java.util.concurrent.atomic.AtomicInteger();
+        private final CountDownLatch firstCallEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseFirstCall = new CountDownLatch(1);
+
+        private BlockingPaymentProvider() {
+            super("SUCCESS");
+        }
+
+        @Override
+        public PaymentProviderResponse processPayment(
+            Payment payment,
+            UUID providerIdempotencyKey
+        ) {
+            calls.incrementAndGet();
+            firstCallEntered.countDown();
+            try {
+                if (!releaseFirstCall.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Provider test call timed out");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(exception);
+            }
+            return super.processPayment(payment, providerIdempotencyKey);
+        }
+
+        private boolean awaitFirstCall(Duration timeout)
+            throws InterruptedException {
+            return firstCallEntered.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        }
+
+        private void releaseFirstCall() {
+            releaseFirstCall.countDown();
+        }
+
+        private int callCount() {
+            return calls.get();
         }
     }
 

@@ -40,7 +40,7 @@ import jakarta.transaction.Transactional;
 
 @SpringBootTest(properties = "sentinelpay.psp.mode=SUCCESS")
 @Transactional
-class PaymentWebhookIntegrationTest {
+class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private UserService userService;

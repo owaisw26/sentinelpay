@@ -25,7 +25,7 @@ import jakarta.transaction.Transactional;
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
-public class WalletSecurityIntegrationTest {
+public class WalletSecurityIntegrationTest extends AbstractIntegrationTest {
     
     @Autowired
     private MockMvc mockMvc;

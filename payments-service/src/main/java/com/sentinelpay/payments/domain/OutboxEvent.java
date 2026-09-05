@@ -1,7 +1,5 @@
 package com.sentinelpay.payments.domain;
 
-
-
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -41,6 +39,21 @@ public class OutboxEvent {
     @Column(name = "published_at")
     private LocalDateTime publishedAt;
 
+    @Column(name = "lease_token")
+    private UUID leaseToken;
+
+    @Column(name = "lease_until")
+    private LocalDateTime leaseUntil;
+
+    @Column(name = "attempt_count", nullable = false)
+    private int attemptCount;
+
+    @Column(name = "next_attempt_at", nullable = false)
+    private LocalDateTime nextAttemptAt;
+
+    @Column(name = "last_error")
+    private String lastError;
+
     public OutboxEvent() {
     }
 
@@ -57,10 +70,12 @@ public class OutboxEvent {
         this.correlationId = correlationId;
         this.createdAt = LocalDateTime.now();
         this.publishedAt = null;
+        this.attemptCount = 0;
+        this.nextAttemptAt = createdAt;
     }
 
     public UUID getId() {
-    return id;
+        return id;
     }
 
     public UUID getAggregateId() {
@@ -87,7 +102,34 @@ public class OutboxEvent {
         return publishedAt;
     }
 
-    public void markPublished() {
-        this.publishedAt = LocalDateTime.now();
+    public UUID getLeaseToken() {
+        return leaseToken;
+    }
+
+    public int getAttemptCount() {
+        return attemptCount;
+    }
+
+    public LocalDateTime getNextAttemptAt() {
+        return nextAttemptAt;
+    }
+
+    public String getLastError() {
+        return lastError;
+    }
+
+    public void claim(
+        UUID token,
+        LocalDateTime leaseExpiry,
+        LocalDateTime now
+    ) {
+        if (publishedAt != null) {
+            throw new IllegalStateException("Published event cannot be claimed");
+        }
+        leaseToken = token;
+        leaseUntil = leaseExpiry;
+        attemptCount++;
+        lastError = null;
+        nextAttemptAt = now;
     }
 }

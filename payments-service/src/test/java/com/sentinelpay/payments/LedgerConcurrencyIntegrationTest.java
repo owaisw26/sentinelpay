@@ -35,7 +35,7 @@ import com.sentinelpay.payments.service.WalletService;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-class LedgerConcurrencyIntegrationTest {
+class LedgerConcurrencyIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;

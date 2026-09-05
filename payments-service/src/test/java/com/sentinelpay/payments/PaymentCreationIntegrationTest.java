@@ -41,7 +41,7 @@ import tools.jackson.databind.JsonNode;
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
-public class PaymentCreationIntegrationTest {
+public class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
