@@ -1,40 +1,67 @@
 package com.sentinelpay.payments.service.outbox;
 
+import java.util.Optional;
+
 import org.springframework.stereotype.Service;
 
-import com.sentinelpay.payments.domain.Payment;
-import com.sentinelpay.payments.domain.PaymentStatus;
-import com.sentinelpay.payments.repository.PaymentRepository;
-import com.sentinelpay.payments.repository.ProcessedEventRepository;
-
-import jakarta.transaction.Transactional;
+import com.sentinelpay.payments.provider.PaymentProvider;
+import com.sentinelpay.payments.provider.PaymentProviderResponse;
 
 @Service
 public class PaymentEventProcessor {
-    private final ProcessedEventRepository processedEventRepository;
-    private final PaymentRepository paymentRepository;
+    private final PaymentProcessingService paymentProcessingService;
+    private final PaymentProvider paymentProvider;
 
     public PaymentEventProcessor(
-        ProcessedEventRepository processedEventRepository,
-        PaymentRepository paymentRepository
+        PaymentProcessingService paymentProcessingService,
+        PaymentProvider paymentProvider
     ) {
-        this.processedEventRepository = processedEventRepository;
-        this.paymentRepository = paymentRepository;
+        this.paymentProcessingService = paymentProcessingService;
+        this.paymentProvider = paymentProvider;
     }
 
-    @Transactional
     public void process(OutboxMessage message) {
-        int claimed =
-            processedEventRepository.claimEvent(message.eventId());
-
-        if (claimed == 0) {
+        if (!"PAYMENT_CREATED".equals(message.eventType()) ||
+            paymentProcessingService.isProcessed(message.eventId())) {
             return;
         }
 
-        if ("PAYMENT_CREATED".equals(message.eventType())) {
-            Payment payment = paymentRepository.findById(message.aggregateId()).orElseThrow();
+        Optional<PaymentProcessingClaim> possibleClaim =
+            paymentProcessingService.claimProcessing(
+                message.eventId(),
+                message.aggregateId()
+            );
 
-            payment.transitionTo(PaymentStatus.SCREENING);
+        if (possibleClaim.isEmpty()) {
+            return;
+        }
+
+        PaymentProcessingClaim claim = possibleClaim.get();
+
+        try {
+            PaymentProviderResponse response = paymentProvider.processPayment(
+                claim.payment(),
+                claim.providerIdempotencyKey()
+            );
+
+            paymentProcessingService.completeProcessing(
+                message.eventId(),
+                claim.payment().getId(),
+                claim.leaseToken(),
+                response
+            );
+            paymentProvider.afterProcessingCompleted(claim.payment(), response);
+        } catch (RuntimeException failure) {
+            try {
+                paymentProcessingService.recordAttemptFailure(
+                    claim.payment().getId(),
+                    claim.leaseToken(),
+                    failure
+                );
+            } catch (RuntimeException recordingFailure) {
+                failure.addSuppressed(recordingFailure);
+            }
+            throw failure;
         }
     }
 }

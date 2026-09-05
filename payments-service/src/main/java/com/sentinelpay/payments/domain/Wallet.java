@@ -26,6 +26,7 @@ public class Wallet {
         this.user = user;
         this.currency = currency;
         this.balance = balance;
+        this.reservedBalance = BigDecimal.ZERO;
         this.createdAt = createdAt;
     }
 
@@ -42,6 +43,9 @@ public class Wallet {
 
     @Column(name = "balance")
     private BigDecimal balance;
+
+    @Column(name = "reserved_balance", nullable = false)
+    private BigDecimal reservedBalance = BigDecimal.ZERO;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -62,11 +66,41 @@ public class Wallet {
         return balance;
     }
 
+    public BigDecimal getReservedBalance() {
+        return reservedBalance;
+    }
+
+    public BigDecimal getAvailableBalance() {
+        return balance.subtract(reservedBalance);
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
 
     public void setBalance(BigDecimal balance) {
         this.balance = balance;
+    }
+
+    public void reserve(BigDecimal amount) {
+        if (getAvailableBalance().compareTo(amount) < 0) {
+            throw new IllegalStateException("Insufficient available balance");
+        }
+        reservedBalance = reservedBalance.add(amount);
+    }
+
+    public void captureReservation(BigDecimal amount) {
+        if (reservedBalance.compareTo(amount) < 0) {
+            throw new IllegalStateException("Reservation exceeds reserved balance");
+        }
+        reservedBalance = reservedBalance.subtract(amount);
+        balance = balance.subtract(amount);
+    }
+
+    public void releaseReservation(BigDecimal amount) {
+        if (reservedBalance.compareTo(amount) < 0) {
+            throw new IllegalStateException("Reservation exceeds reserved balance");
+        }
+        reservedBalance = reservedBalance.subtract(amount);
     }
 }

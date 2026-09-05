@@ -20,10 +20,21 @@ public class LedgerTransaction {
         String type,
         LocalDateTime createdAt
     ) {
+        this(id, reference, type, createdAt, null);
+    }
+
+    public LedgerTransaction(
+        UUID id,
+        String reference,
+        String type,
+        LocalDateTime createdAt,
+        UUID paymentId
+    ) {
         this.id = id;
         this.reference = reference;
         this.type = type;
         this.createdAt = createdAt;
+        this.paymentId = paymentId;
     }
 
     @Id
@@ -39,7 +50,14 @@ public class LedgerTransaction {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "payment_id", unique = true)
+    private UUID paymentId;
+
     public UUID getId() {
         return id;
+    }
+
+    public UUID getPaymentId() {
+        return paymentId;
     }
 }

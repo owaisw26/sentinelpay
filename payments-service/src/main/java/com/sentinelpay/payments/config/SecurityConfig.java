@@ -71,6 +71,7 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/**").permitAll()
                 .requestMatchers("/dev/**").permitAll()
                 .requestMatchers("/users").permitAll()
+                .requestMatchers("/webhooks/psp").permitAll()
 
                 .anyRequest().authenticated()
             )

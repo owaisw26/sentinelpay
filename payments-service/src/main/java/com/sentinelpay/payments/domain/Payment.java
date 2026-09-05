@@ -77,6 +77,9 @@ public class Payment {
     @Column(name = "request_hash", nullable = false)
     private String requestHash;
 
+    @Column(name = "provider_payment_id", unique = true)
+    private String providerPaymentId;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -123,6 +126,10 @@ public class Payment {
         return requestHash;
     }
 
+    public String getProviderPaymentId() {
+        return providerPaymentId;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -139,5 +146,16 @@ public class Payment {
         } else {
             throw new InvalidPaymentTransition(this.status.toString(), newStatus.toString());
         }
+    }
+
+    public void assignProviderPaymentId(String providerPaymentId) {
+        if (this.providerPaymentId != null &&
+            !this.providerPaymentId.equals(providerPaymentId)) {
+            throw new IllegalStateException(
+                "Payment already has a different provider payment ID"
+            );
+        }
+
+        this.providerPaymentId = providerPaymentId;
     }
 }

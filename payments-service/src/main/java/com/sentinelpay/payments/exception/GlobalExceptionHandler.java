@@ -90,4 +90,15 @@ public class GlobalExceptionHandler {
             "message", exception.getMessage()
         );
     }
+
+    @ExceptionHandler(InvalidWebhookSignatureException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public Map<String, String> handleInvalidWebhookSignature(
+        InvalidWebhookSignatureException exception
+    ) {
+        return Map.of(
+            "error", "INVALID_WEBHOOK_SIGNATURE",
+            "message", exception.getMessage()
+        );
+    }
 }

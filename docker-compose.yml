@@ -23,6 +23,9 @@ services:
       SERVICES: sqs,sns
     ports:
       - "4566:4566"
+    volumes:
+      - ./infra/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+
 
 volumes:
   postgres_data:
