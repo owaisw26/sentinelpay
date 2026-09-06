@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.sentinelpay.payments.provider.PaymentProviderWebhook;
 import com.sentinelpay.payments.security.WebhookSignatureVerifier;
+import com.sentinelpay.payments.security.PayloadHasher;
 import com.sentinelpay.payments.service.PaymentWebhookProcessor;
 
 import tools.jackson.databind.ObjectMapper;
@@ -43,6 +44,6 @@ public class PaymentWebhookController {
             rawBody,
             PaymentProviderWebhook.class
         );
-        processor.process(webhook);
+        processor.process(webhook, PayloadHasher.sha256(rawBody));
     }
 }

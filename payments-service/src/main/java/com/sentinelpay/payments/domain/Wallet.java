@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 @Entity
 @Table(name = "wallets")
@@ -47,6 +48,10 @@ public class Wallet {
     @Column(name = "reserved_balance", nullable = false)
     private BigDecimal reservedBalance = BigDecimal.ZERO;
 
+    @Version
+    @Column(name = "version", nullable = false)
+    private int version;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -68,6 +73,10 @@ public class Wallet {
 
     public BigDecimal getReservedBalance() {
         return reservedBalance;
+    }
+
+    public int getVersion() {
+        return version;
     }
 
     public BigDecimal getAvailableBalance() {

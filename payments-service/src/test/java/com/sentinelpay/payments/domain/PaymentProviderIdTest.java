@@ -47,7 +47,7 @@ class PaymentProviderIdTest {
             "AUD",
             "provider-id-test",
             PaymentStatus.PROCESSING,
-            UUID.randomUUID(),
+            UUID.randomUUID().toString(),
             "request-hash",
             now,
             now

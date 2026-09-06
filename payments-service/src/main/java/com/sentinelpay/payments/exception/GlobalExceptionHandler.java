@@ -1,104 +1,204 @@
 package com.sentinelpay.payments.exception;
 
-import java.util.Map;
+import java.net.URI;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 @RestControllerAdvice
-public class GlobalExceptionHandler {
-    @ExceptionHandler(WalletNotFoundException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    public Map<String,String> handleWalletNotFound(WalletNotFoundException exception) {
-        return Map.of(
-            "error", "WALLET_NOT_FOUND",
-            "message", exception.getMessage()
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+    @ExceptionHandler({
+        WalletNotFoundException.class,
+        WalletUnauthorizedAccess.class
+    })
+    public ProblemDetail handleWalletNotFound(RuntimeException exception) {
+        return problem(
+            HttpStatus.NOT_FOUND,
+            "WALLET_NOT_FOUND",
+            "Wallet not found"
         );
     }
 
     @ExceptionHandler(UserNotFoundException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    public Map<String,String> handleUserNotFound(UserNotFoundException exception) {
-        return Map.of(
-            "error", "USER_NOT_FOUND",
-            "message", exception.getMessage()
-        );
-    }
-
-    @ExceptionHandler(WalletUnauthorizedAccess.class)
-    @ResponseStatus(HttpStatus.FORBIDDEN)
-    public Map<String,String> handleWalletUnauthorized(WalletUnauthorizedAccess exception) {
-        return Map.of(
-            "error", "WALLET_ACCESS_DENIED",
-            "message", exception.getMessage()
-        );
+    public ProblemDetail handleUserNotFound(UserNotFoundException exception) {
+        return problem(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "User not found");
     }
 
     @ExceptionHandler(WalletInsufficientBalanceException.class)
-    @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
-    public Map<String, String> handleWalletInsufficientBalance(WalletInsufficientBalanceException exception) {
-        return Map.of(
-            "error", "WALLET_INSUFFICIENT_BALANCE",
-            "message", exception.getMessage()
+    public ProblemDetail handleInsufficientBalance(
+        WalletInsufficientBalanceException exception
+    ) {
+        return problem(
+            HttpStatus.UNPROCESSABLE_CONTENT,
+            "WALLET_INSUFFICIENT_BALANCE",
+            "Insufficient available balance"
         );
     }
 
     @ExceptionHandler(InvalidTransferException.class)
-    @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
-    public Map<String, String> handleWalletsHaveDifferentCurrencyException(InvalidTransferException exception) {
-        return Map.of(
-            "error", "DIFFERENT_WALLET_CURRENCY_NOT_ALLOWED",
-            "message", exception.getMessage()
+    public ProblemDetail handleInvalidTransfer(InvalidTransferException exception) {
+        return problem(
+            HttpStatus.UNPROCESSABLE_CONTENT,
+            "INVALID_TRANSFER",
+            exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(InvalidPaymentRequestException.class)
+    public ProblemDetail handleInvalidPaymentRequest(
+        InvalidPaymentRequestException exception
+    ) {
+        return problem(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_PAYMENT_REQUEST",
+            exception.getMessage()
         );
     }
 
     @ExceptionHandler(PaymentAlreadyExistsException.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public Map<String, String> handlePaymentAlreadyExists(PaymentAlreadyExistsException exception) {
-        return Map.of(
-            "error", "PAYMENT_ALREADY_EXISTS",
-            "message", exception.getMessage()
+    public ProblemDetail handlePaymentAlreadyExists(
+        PaymentAlreadyExistsException exception
+    ) {
+        return problem(
+            HttpStatus.CONFLICT,
+            "IDEMPOTENCY_KEY_REUSED",
+            "Idempotency-Key was already used with a different request"
         );
     }
 
     @ExceptionHandler(InvalidPaymentTransition.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public Map<String, String> handlePaymentAlreadyExists(InvalidPaymentTransition exception) {
-        return Map.of(
-            "error", "INVALID_PAYMENT_TRANSITION",
-            "message", exception.getMessage()
+    public ProblemDetail handleInvalidTransition(InvalidPaymentTransition exception) {
+        return problem(
+            HttpStatus.CONFLICT,
+            "INVALID_PAYMENT_TRANSITION",
+            exception.getMessage()
         );
     }
 
-    @ExceptionHandler(PaymentNotFoundException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    public Map<String, String> handlePaymentNotFound(PaymentNotFoundException exception) {
-        return Map.of(
-            "error", "PAYMENT_NOT_FOUND",
-            "message", exception.getMessage()
-        );
-    }
-
-    @ExceptionHandler(PaymentUnauthorizedAccess.class)
-    @ResponseStatus(HttpStatus.FORBIDDEN)
-    public Map<String, String> handlePaymentUnauthorized(PaymentUnauthorizedAccess exception) {
-        return Map.of(
-            "error", "PAYMENT_ACCESS_DENIED",
-            "message", exception.getMessage()
+    @ExceptionHandler({
+        PaymentNotFoundException.class,
+        PaymentUnauthorizedAccess.class
+    })
+    public ProblemDetail handlePaymentNotFound(RuntimeException exception) {
+        return problem(
+            HttpStatus.NOT_FOUND,
+            "PAYMENT_NOT_FOUND",
+            "Payment not found"
         );
     }
 
     @ExceptionHandler(InvalidWebhookSignatureException.class)
-    @ResponseStatus(HttpStatus.UNAUTHORIZED)
-    public Map<String, String> handleInvalidWebhookSignature(
+    public ProblemDetail handleInvalidWebhookSignature(
         InvalidWebhookSignatureException exception
     ) {
-        return Map.of(
-            "error", "INVALID_WEBHOOK_SIGNATURE",
-            "message", exception.getMessage()
+        return problem(
+            HttpStatus.UNAUTHORIZED,
+            "INVALID_WEBHOOK_SIGNATURE",
+            "Webhook signature is invalid or expired"
         );
+    }
+
+    @ExceptionHandler(InvalidWebhookPayloadException.class)
+    public ProblemDetail handleInvalidWebhookPayload(
+        InvalidWebhookPayloadException exception
+    ) {
+        return problem(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_WEBHOOK_PAYLOAD",
+            exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(ConflictingWebhookEventException.class)
+    public ProblemDetail handleConflictingWebhookEvent(
+        ConflictingWebhookEventException exception
+    ) {
+        return problem(
+            HttpStatus.CONFLICT,
+            "CONFLICTING_WEBHOOK_EVENT",
+            exception.getMessage()
+        );
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(
+        MethodArgumentNotValidException exception,
+        HttpHeaders headers,
+        HttpStatusCode status,
+        WebRequest request
+    ) {
+        String detail = exception.getBindingResult().getFieldErrors().stream()
+            .findFirst()
+            .map(error -> error.getField() + ": " + error.getDefaultMessage())
+            .orElse("Request body is invalid");
+        return new ResponseEntity<>(
+            problem(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", detail),
+            headers,
+            status
+        );
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleHandlerMethodValidationException(
+        HandlerMethodValidationException exception,
+        HttpHeaders headers,
+        HttpStatusCode status,
+        WebRequest request
+    ) {
+        return new ResponseEntity<>(
+            problem(
+                HttpStatus.BAD_REQUEST,
+                "VALIDATION_FAILED",
+                "Request header or path parameter is invalid"
+            ),
+            headers,
+            status
+        );
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleHttpMessageNotReadable(
+        HttpMessageNotReadableException exception,
+        HttpHeaders headers,
+        HttpStatusCode status,
+        WebRequest request
+    ) {
+        return new ResponseEntity<>(
+            problem(
+                HttpStatus.BAD_REQUEST,
+                "MALFORMED_REQUEST",
+                "Request body is malformed"
+            ),
+            headers,
+            status
+        );
+    }
+
+    private ProblemDetail problem(
+        HttpStatus status,
+        String errorCode,
+        String detail
+    ) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+        problem.setTitle(status.getReasonPhrase());
+        problem.setType(URI.create(
+            "urn:sentinelpay:problem:" + errorCode.toLowerCase()
+                .replace('_', '-')
+        ));
+        problem.setProperty("errorCode", errorCode);
+        // Retained as a compatibility extension while clients move to
+        // errorCode and the standard RFC 7807 fields.
+        problem.setProperty("error", errorCode);
+        return problem;
     }
 }

@@ -9,8 +9,8 @@ import org.springframework.stereotype.Service;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.exception.UserNotFoundException;
+import com.sentinelpay.payments.exception.InvalidPaymentRequestException;
 import com.sentinelpay.payments.exception.WalletNotFoundException;
-import com.sentinelpay.payments.exception.WalletUnauthorizedAccess;
 import com.sentinelpay.payments.repository.UserRepository;
 import com.sentinelpay.payments.repository.WalletRepository;
 
@@ -27,6 +27,11 @@ public class WalletService {
     }
 
     public Wallet createWallet(UUID userId, String currency) {
+        if (!"AUD".equals(currency)) {
+            throw new InvalidPaymentRequestException(
+                "Only AUD wallets are supported"
+            );
+        }
         User user = userRepository.findById(userId).orElseThrow(() -> 
         new UserNotFoundException());
 
@@ -49,7 +54,7 @@ public class WalletService {
         if (userId.equals(walletUserId)) {
             return wallet;
         } else {
-            throw new WalletUnauthorizedAccess(userId);
+            throw new WalletNotFoundException(walletId);
         }
     }
 

@@ -17,6 +17,7 @@ import com.sentinelpay.payments.domain.LedgerTransaction;
 import com.sentinelpay.payments.domain.OutboxEvent;
 import com.sentinelpay.payments.domain.Payment;
 import com.sentinelpay.payments.domain.PaymentStatus;
+import com.sentinelpay.payments.domain.PaymentReservationStatus;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.provider.PaymentProviderWebhook;
@@ -26,7 +27,9 @@ import com.sentinelpay.payments.repository.LedgerEntryRepository;
 import com.sentinelpay.payments.repository.LedgerTransactionRepository;
 import com.sentinelpay.payments.repository.OutboxEventRepository;
 import com.sentinelpay.payments.repository.PaymentRepository;
+import com.sentinelpay.payments.repository.PaymentReservationRepository;
 import com.sentinelpay.payments.repository.WalletRepository;
+import com.sentinelpay.payments.repository.WebhookReceiptRepository;
 import com.sentinelpay.payments.service.PaymentService;
 import com.sentinelpay.payments.service.PaymentWebhookProcessor;
 import com.sentinelpay.payments.service.UserService;
@@ -67,6 +70,9 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
     private PaymentRepository paymentRepository;
 
     @Autowired
+    private PaymentReservationRepository paymentReservationRepository;
+
+    @Autowired
     private WalletRepository walletRepository;
 
     @Autowired
@@ -74,6 +80,9 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private LedgerEntryRepository ledgerEntryRepository;
+
+    @Autowired
+    private WebhookReceiptRepository webhookReceiptRepository;
 
     @Autowired
     private EntityManager entityManager;
@@ -173,6 +182,11 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
                 .filter(entry -> entry.getAmount().compareTo(amount.negate()) == 0)
                 .count()
         );
+        assertEquals(2, webhookReceiptRepository.findAll().stream()
+            .filter(receipt -> receipt.getProviderPaymentId().equals(
+                payment.getProviderPaymentId()))
+            .peek(receipt -> assertNotNull(receipt.getProcessedAt()))
+            .count());
         assertEquals(
             1,
             entries.stream()
@@ -215,6 +229,11 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
 
         Payment failedPayment = paymentRepository.findById(payment.getId())
             .orElseThrow();
+        paymentWebhookProcessor.process(new PaymentProviderWebhook(
+            UUID.randomUUID(),
+            failedPayment.getProviderPaymentId(),
+            PaymentProviderWebhookStatus.DECLINED
+        ));
         Wallet unchangedSender = walletRepository.findById(sender.getId())
             .orElseThrow();
         Wallet unchangedReceiver = walletRepository.findById(receiver.getId())
@@ -225,6 +244,13 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
         assertEquals(0, BigDecimal.ZERO.compareTo(unchangedSender.getReservedBalance()));
         assertEquals(0, BigDecimal.ZERO.compareTo(unchangedReceiver.getBalance()));
         assertTrue(ledgerTransactionRepository.findTransactionByReference(reference).isEmpty());
+        assertEquals(PaymentReservationStatus.RELEASED,
+            paymentReservationRepository.findById(payment.getId())
+                .orElseThrow().getStatus());
+        assertEquals(2, webhookReceiptRepository.findAll().stream()
+            .filter(receipt -> receipt.getProviderPaymentId().equals(
+                failedPayment.getProviderPaymentId()))
+            .count());
     }
 
     @Test

@@ -35,6 +35,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.sentinelpay.payments.domain.OutboxEvent;
 import com.sentinelpay.payments.domain.Payment;
@@ -123,6 +124,9 @@ public class OutboxPublisherIntegrationTests extends AbstractIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private PaymentEventConsumer paymentEventConsumer;
@@ -418,7 +422,10 @@ public class OutboxPublisherIntegrationTests extends AbstractIntegrationTest {
                 .findById(payment.getId())
                 .orElseThrow();
             assertEquals(PaymentStatus.PROCESSING, afterFirstAttempt.getStatus());
-            assertEquals(idempotencyKey, afterFirstAttempt.getIdempotencyKey());
+            assertEquals(
+                idempotencyKey.toString(),
+                afterFirstAttempt.getIdempotencyKey()
+            );
             assertFalse(processedEventRepository.existsById(event.getId()));
 
             awaitConsumerAttempts(
@@ -442,7 +449,7 @@ public class OutboxPublisherIntegrationTests extends AbstractIntegrationTest {
                 .findById(payment.getId())
                 .orElseThrow();
             assertEquals(payment.getId(), afterRetry.getId());
-            assertEquals(idempotencyKey, afterRetry.getIdempotencyKey());
+            assertEquals(idempotencyKey.toString(), afterRetry.getIdempotencyKey());
             assertFalse(processedEventRepository.existsById(event.getId()));
         } finally {
             QUEUE_ADMIN.deleteQueue(
@@ -822,6 +829,10 @@ public class OutboxPublisherIntegrationTests extends AbstractIntegrationTest {
             .ifPresent(providerAttemptRepository::delete);
         paymentReservationRepository.findById(paymentId)
             .ifPresent(paymentReservationRepository::delete);
+        jdbcTemplate.update(
+            "delete from api_idempotency_records where payment_id = ?",
+            paymentId
+        );
         paymentRepository.findById(paymentId)
             .ifPresent(paymentRepository::delete);
         walletRepository.deleteAllById(

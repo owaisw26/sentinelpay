@@ -7,25 +7,29 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Size;
 
 public record PaymentRequest(
     @NotNull
-    UUID senderWallet,
+    UUID senderWalletId,
 
     @NotNull
-    UUID receiverWallet,
+    UUID receiverWalletId,
 
     @NotBlank
+    @Size(max = 140)
     String reference,
 
     @NotNull
     @Positive
+    @Digits(integer = 17, fraction = 2)
     BigDecimal amount,
 
     @NotBlank
     @Pattern(
-        regexp = "[A-Z]{3}",
-        message = "currency must be a three-letter uppercase code"
+        regexp = "AUD",
+        message = "only AUD payments are supported"
     )
     String currency
 ) {

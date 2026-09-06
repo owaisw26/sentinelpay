@@ -4,8 +4,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 
 import com.sentinelpay.payments.controller.request.UserRequest;
+import com.sentinelpay.payments.controller.response.UserResponse;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.service.UserService;
 
@@ -21,9 +24,17 @@ public class UserController {
     }
 
     @PostMapping
-    public User createUserRequest(
-        @Valid @RequestBody UserRequest requestBody
+    public UserResponse createUserRequest(
+        @Valid @RequestBody UserRequest requestBody,
+        Authentication authentication
     ) {
-        return userService.createUser(requestBody.name(), requestBody.role());
+        User user = authentication == null ||
+            authentication instanceof AnonymousAuthenticationToken
+            ? userService.createCustomer(requestBody.name())
+            : userService.provisionCustomer(
+                java.util.UUID.fromString(authentication.getName()),
+                requestBody.name()
+            );
+        return UserResponse.from(user);
     }
 }

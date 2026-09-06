@@ -9,6 +9,8 @@ public record WalletResponse(
     UUID userId,
     String currency, 
     BigDecimal balance,
+    BigDecimal reservedBalance,
+    BigDecimal availableBalance,
     LocalDateTime createdAt
 ) {
     

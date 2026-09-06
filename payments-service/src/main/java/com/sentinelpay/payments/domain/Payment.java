@@ -12,6 +12,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -27,7 +28,7 @@ public class Payment {
 
     public Payment() {}
 
-    public Payment(UUID id, int version, Wallet senderWallet, Wallet receiverWallet, BigDecimal amount, String currency, String reference, PaymentStatus status, UUID idempotencyKey, String requestHash, LocalDateTime createdAt, LocalDateTime updatedAt) {
+    public Payment(UUID id, int version, Wallet senderWallet, Wallet receiverWallet, BigDecimal amount, String currency, String reference, PaymentStatus status, String idempotencyKey, String requestHash, LocalDateTime createdAt, LocalDateTime updatedAt) {
         this.id = id;
         this.version = version;
         this.senderWallet = senderWallet;
@@ -50,11 +51,11 @@ public class Payment {
     @Column(name = "version", nullable = false)
     private int version;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name="sender_wallet_id", nullable =  false)
     private Wallet senderWallet;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name="receiver_wallet_id", nullable =false)
     private Wallet receiverWallet;
 
@@ -72,7 +73,7 @@ public class Payment {
     private PaymentStatus status;
 
     @Column(name = "idempotency_key", nullable = false)
-    private UUID idempotencyKey;
+    private String idempotencyKey;
 
     @Column(name = "request_hash", nullable = false)
     private String requestHash;
@@ -118,7 +119,7 @@ public class Payment {
         return status;
     }
 
-    public UUID getIdempotencyKey() {
+    public String getIdempotencyKey() {
         return idempotencyKey;
     }
 
@@ -143,6 +144,7 @@ public class Payment {
 
         if (possibleStates.contains(newStatus)) {
             this.status = newStatus;
+            this.updatedAt = LocalDateTime.now();
         } else {
             throw new InvalidPaymentTransition(this.status.toString(), newStatus.toString());
         }

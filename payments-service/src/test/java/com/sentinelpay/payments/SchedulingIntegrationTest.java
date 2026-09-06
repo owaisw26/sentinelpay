@@ -17,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.sentinelpay.payments.domain.OutboxEvent;
 import com.sentinelpay.payments.domain.Payment;
@@ -87,6 +88,9 @@ class SchedulingIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Test
     void scheduledPublisherAndConsumerProcessPaymentWithoutManualPolling()
         throws Exception {
@@ -141,6 +145,10 @@ class SchedulingIntegrationTest {
             providerAttemptRepository.deleteAllById(List.of(payment.getId()));
             paymentReservationRepository.deleteAllById(List.of(payment.getId()));
             outboxEventRepository.deleteAllById(List.of(event.getId()));
+            jdbcTemplate.update(
+                "delete from api_idempotency_records where payment_id = ?",
+                payment.getId()
+            );
             paymentRepository.deleteAllById(List.of(payment.getId()));
             walletRepository.deleteAllById(List.of(sender.getId(), receiver.getId()));
             userRepository.deleteAllById(List.of(

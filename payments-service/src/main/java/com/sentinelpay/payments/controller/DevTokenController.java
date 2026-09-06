@@ -11,12 +11,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.context.annotation.Profile;
 
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.repository.UserRepository;
 
 @RestController
 @RequestMapping("/dev")
+@Profile({"local", "test"})
 public class DevTokenController {
     private final JwtEncoder jwtEncoder;
     private final UserRepository userRepository;

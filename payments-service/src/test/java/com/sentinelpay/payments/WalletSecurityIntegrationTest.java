@@ -77,7 +77,9 @@ public class WalletSecurityIntegrationTest extends AbstractIntegrationTest {
             andExpect(jsonPath("$.userId").value(customer.getUserId().toString())
             ).
             andExpect(jsonPath("$.currency").value("AUD")).
-            andExpect(jsonPath("$.balance").value(0));
+            andExpect(jsonPath("$.balance").value(0)).
+            andExpect(jsonPath("$.reservedBalance").value(0)).
+            andExpect(jsonPath("$.availableBalance").value(0));
     }
 
     @Test
@@ -108,7 +110,8 @@ public class WalletSecurityIntegrationTest extends AbstractIntegrationTest {
 
         mockMvc.perform(
             get("/wallets/{walletId}", walletTwo.getId()).header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenOne)
-        ).andExpect(status().isForbidden());
+        ).andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.detail").value("Wallet not found"));
     }
 
     @Test
@@ -129,5 +132,33 @@ public class WalletSecurityIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(
             get("/analyst/test").header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
         ).andExpect(status().isOk());
+    }
+
+    @Test
+    void publicRegistrationCannotSelectAnalystRole() throws Exception {
+        mockMvc.perform(post("/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "name":"Attempted Analyst",
+                      "role":"ANALYST"
+                    }
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.errorCode").value("MALFORMED_REQUEST"));
+    }
+
+    @Test
+    void publicRegistrationAlwaysCreatesCustomerWithoutExposingRole()
+        throws Exception {
+        mockMvc.perform(post("/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"name":"New Customer"}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.userId").isNotEmpty())
+            .andExpect(jsonPath("$.name").value("New Customer"))
+            .andExpect(jsonPath("$.role").doesNotExist());
     }
 }

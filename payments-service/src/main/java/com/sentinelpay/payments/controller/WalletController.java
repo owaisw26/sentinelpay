@@ -10,11 +10,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.sentinelpay.payments.controller.request.TransferRequest;
 import com.sentinelpay.payments.controller.request.WalletRequest;
 import com.sentinelpay.payments.controller.response.WalletResponse;
 import com.sentinelpay.payments.domain.Wallet;
-import com.sentinelpay.payments.service.LedgerService;
 import com.sentinelpay.payments.service.WalletService;
 
 import jakarta.validation.Valid;
@@ -23,13 +21,9 @@ import jakarta.validation.Valid;
 @RequestMapping("/wallets")
 public class WalletController {
     private final WalletService walletService;
-    private final LedgerService ledgerService;
 
-    public WalletController(WalletService walletService,
-        LedgerService ledgerService
-    ) {
+    public WalletController(WalletService walletService) {
         this.walletService = walletService;
-        this.ledgerService = ledgerService;
     }
 
     @PostMapping
@@ -45,7 +39,9 @@ public class WalletController {
         return new WalletResponse(wallet.getId(), 
                                   wallet.getUser().getUserId(), 
                                   wallet.getCurrency(), 
-                                  wallet.getBalance(), 
+                                  wallet.getBalance(),
+                                  wallet.getReservedBalance(),
+                                  wallet.getAvailableBalance(),
                                   wallet.getCreatedAt());
         }
 
@@ -59,21 +55,9 @@ public class WalletController {
         return new WalletResponse(wallet.getId(), 
                                   wallet.getUser().getUserId(), 
                                   wallet.getCurrency(), 
-                                  wallet.getBalance(), 
-                                  wallet.getCreatedAt());
-    }
-
-    @PostMapping("/transfer")
-    public WalletResponse transferAmount(
-        @Valid @RequestBody TransferRequest request,
-        Authentication authentication
-    ) {
-        UUID userId = UUID.fromString(authentication.getName());
-        Wallet wallet = ledgerService.transfer(userId, request.senderWallet(), request.receiverWallet(), request.amount(), request.reference());
-        return new WalletResponse(wallet.getId(), 
-                                  wallet.getUser().getUserId(), 
-                                  wallet.getCurrency(), 
-                                  wallet.getBalance(), 
+                                  wallet.getBalance(),
+                                  wallet.getReservedBalance(),
+                                  wallet.getAvailableBalance(),
                                   wallet.getCreatedAt());
     }
 }

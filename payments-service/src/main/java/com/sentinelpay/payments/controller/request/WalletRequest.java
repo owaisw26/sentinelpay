@@ -5,7 +5,7 @@ import jakarta.validation.constraints.Pattern;
 
 public record WalletRequest(
     @NotBlank
-    @Pattern(regexp = "[A-Z]{3}")
+    @Pattern(regexp = "AUD", message = "only AUD wallets are supported")
     String currency
 ) {
     

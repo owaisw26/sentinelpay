@@ -21,5 +21,20 @@ public class UserService {
 
         User user = new User(userId, name, role, LocalDateTime.now());
         return userRepository.save(user);
-    }   
+    }
+
+    public User createCustomer(String name) {
+        return createUser(name, "CUSTOMER");
+    }
+
+    public User provisionCustomer(UUID verifiedSubject, String name) {
+        return userRepository.findById(verifiedSubject).orElseGet(() ->
+            userRepository.save(new User(
+                verifiedSubject,
+                name,
+                "CUSTOMER",
+                LocalDateTime.now()
+            ))
+        );
+    }
 }

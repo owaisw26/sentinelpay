@@ -12,10 +12,6 @@ import com.sentinelpay.payments.domain.Payment;
 import jakarta.persistence.LockModeType;
 
 public interface PaymentRepository extends JpaRepository<Payment, UUID>{
-    // need to fetch payment with idempotency key probably
-    @Query("select p from Payment p where p.idempotencyKey = :idempotencyKey")
-    Optional<Payment> findByIdempotencyKey(@Param("idempotencyKey") UUID key);
-
     @Query(("select p from Payment p where p.providerPaymentId = :providerPaymentId"))
     Optional<Payment> findByProviderPaymentId(@Param("providerPaymentId") String providerPaymentId);
 

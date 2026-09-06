@@ -96,7 +96,7 @@ class LedgerServiceTest {
             "AUD",
             "payment-settlement",
             PaymentStatus.PROCESSING,
-            UUID.randomUUID(),
+            UUID.randomUUID().toString(),
             "request-hash",
             now,
             now
@@ -165,7 +165,7 @@ class LedgerServiceTest {
             "USD",
             "wrong-currency",
             PaymentStatus.PROCESSING,
-            UUID.randomUUID(),
+            UUID.randomUUID().toString(),
             "request-hash",
             now,
             now

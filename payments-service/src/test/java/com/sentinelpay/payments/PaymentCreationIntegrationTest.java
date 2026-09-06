@@ -1,47 +1,36 @@
 package com.sentinelpay.payments;
 
-import java.math.BigDecimal;
-import java.util.List;
-import java.util.UUID;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
-import com.sentinelpay.payments.domain.OutboxEvent;
-import com.sentinelpay.payments.domain.Payment;
-import com.sentinelpay.payments.domain.PaymentStatus;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
-import com.sentinelpay.payments.exception.InvalidPaymentTransition;
-import com.sentinelpay.payments.repository.OutboxEventRepository;
 import com.sentinelpay.payments.repository.PaymentRepository;
-import com.sentinelpay.payments.service.PaymentService;
 import com.sentinelpay.payments.service.UserService;
 import com.sentinelpay.payments.service.WalletService;
 
 import jakarta.transaction.Transactional;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.JsonNode;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
-public class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
+class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
@@ -52,328 +41,159 @@ public class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
     private WalletService walletService;
 
     @Autowired
-    private PaymentService paymentService;
-
-    @Autowired
     private PaymentRepository paymentRepository;
 
-    @Autowired
-    private OutboxEventRepository outboxEventRepository;
+    @Test
+    void identicalRetryReturnsExactOriginalBodyAndReplayHeader() throws Exception {
+        Fixture fixture = fixture();
+        String key = "opaque-retry-key-" + UUID.randomUUID();
+        String body = paymentBody(fixture, "125.00", "AUD", "invoice-42");
 
-    @Autowired
-    private ObjectMapper objectMapper;
+        MvcResult first = create(fixture, key, body)
+            .andExpect(status().isCreated())
+            .andExpect(header().doesNotExist("Idempotency-Replayed"))
+            .andExpect(jsonPath("$.id").isNotEmpty())
+            .andExpect(jsonPath("$.senderWalletId")
+                .value(fixture.sender().getId().toString()))
+            .andExpect(jsonPath("$.receiverWalletId")
+                .value(fixture.receiver().getId().toString()))
+            .andExpect(jsonPath("$.status").value("CREATED"))
+            .andExpect(jsonPath("$.requestHash").doesNotExist())
+            .andExpect(jsonPath("$.idempotencyKey").doesNotExist())
+            .andExpect(jsonPath("$.providerPaymentId").doesNotExist())
+            .andReturn();
+
+        MvcResult replay = create(fixture, key, body)
+            .andExpect(status().isCreated())
+            .andExpect(header().string("Idempotency-Replayed", "true"))
+            .andReturn();
+
+        assertEquals(
+            first.getResponse().getContentAsString(),
+            replay.getResponse().getContentAsString()
+        );
+
+        String paymentId = com.jayway.jsonpath.JsonPath.read(
+            first.getResponse().getContentAsString(), "$.id"
+        );
+        mockMvc.perform(get("/payments/{id}", paymentId)
+                .header(HttpHeaders.AUTHORIZATION,
+                    "Bearer " + fixture.token()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.senderWalletId")
+                .value(fixture.sender().getId().toString()))
+            .andExpect(jsonPath("$.receiverWalletId")
+                .value(fixture.receiver().getId().toString()))
+            .andExpect(jsonPath("$.requestHash").doesNotExist());
+    }
+
+    @Test
+    void reusingKeyForDifferentRequestReturnsProblemDetail() throws Exception {
+        Fixture fixture = fixture();
+        String key = "conflict-key-" + UUID.randomUUID();
+
+        create(fixture, key,
+            paymentBody(fixture, "10.00", "AUD", "first"))
+            .andExpect(status().isCreated());
+
+        create(fixture, key,
+            paymentBody(fixture, "11.00", "AUD", "first"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.type").value(
+                "urn:sentinelpay:problem:idempotency-key-reused"))
+            .andExpect(jsonPath("$.status").value(409))
+            .andExpect(jsonPath("$.errorCode")
+                .value("IDEMPOTENCY_KEY_REUSED"));
+    }
+
+    @Test
+    void currencyAndPrecisionFailBeforePaymentPersistence() throws Exception {
+        Fixture fixture = fixture();
+        long before = paymentRepository.count();
+
+        create(fixture, "usd-" + UUID.randomUUID(),
+            paymentBody(fixture, "10.00", "USD", "wrong currency"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.errorCode").value("VALIDATION_FAILED"));
+
+        create(fixture, "precision-" + UUID.randomUUID(),
+            paymentBody(fixture, "10.001", "AUD", "too precise"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.errorCode").value("VALIDATION_FAILED"));
+
+        assertEquals(before, paymentRepository.count());
+    }
+
+    @Test
+    void paymentOwnershipIsHiddenBehindNotFound() throws Exception {
+        Fixture fixture = fixture();
+        String key = "owned-" + UUID.randomUUID();
+        MvcResult created = create(fixture, key,
+            paymentBody(fixture, "10.00", "AUD", "private"))
+            .andExpect(status().isCreated())
+            .andReturn();
+        String paymentId = com.jayway.jsonpath.JsonPath.read(
+            created.getResponse().getContentAsString(), "$.id"
+        );
+
+        User stranger = userService.createCustomer("Stranger");
+        String strangerToken = issueToken(stranger.getUserId());
+        mockMvc.perform(get("/payments/{id}", paymentId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + strangerToken))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.detail").value("Payment not found"));
+    }
+
+    private Fixture fixture() throws Exception {
+        User senderUser = userService.createCustomer("Payment Sender");
+        User receiverUser = userService.createCustomer("Payment Receiver");
+        Wallet sender = walletService.createWallet(senderUser.getUserId(), "AUD");
+        Wallet receiver = walletService.createWallet(receiverUser.getUserId(), "AUD");
+        return new Fixture(senderUser, sender, receiver,
+            issueToken(senderUser.getUserId()));
+    }
 
     private String issueToken(UUID userId) throws Exception {
-        return mockMvc.perform(
-                post("/dev/token/{userId}", userId)
-            )
+        return mockMvc.perform(post("/dev/token/{userId}", userId))
             .andExpect(status().isOk())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
+            .andReturn().getResponse().getContentAsString();
     }
 
-    @Test
-    public void identicalRetry() throws Exception {
-        User userOne = userService.createUser("Tester", "CUSTOMER");
-        User userTwo = userService.createUser("TesterTwo", "CUSTOMER");
-
-        Wallet one = walletService.createWallet(userOne.getUserId(), "AUD");
-        Wallet two = walletService.createWallet(userTwo.getUserId(), "AUD");
-
-        String token = issueToken(userOne.getUserId());
-        UUID idempotencyKey = UUID.randomUUID();
-
-        // first request
-        mockMvc.perform(
-            post("/payments").header(HttpHeaders.AUTHORIZATION, "Bearer " + token).header("Idempotency-key", idempotencyKey.toString()).contentType(MediaType.APPLICATION_JSON).content("""
-                {
-                    "senderWallet": "%s",
-                    "receiverWallet": "%s",
-                    "reference": "%s",
-                    "amount": "%s",
-                    "currency": "%s" 
-                }     
-                """.formatted(one.getId(), two.getId(), "1-2-3-4", "125", "AUD")
-            )
-        )
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.id").isNotEmpty())
-            .andExpect(jsonPath("$.senderWallet.id").value(one.getId().toString()))
-            .andExpect(jsonPath("$.receiverWallet.id").value(two.getId().toString()))
-            .andExpect(jsonPath("$.reference").value("1-2-3-4"))
-            .andExpect(jsonPath("$.amount").value(125))
-            .andExpect(jsonPath("$.currency").value("AUD"))
-            .andExpect(jsonPath("$.status").value("CREATED"))
-            .andExpect(jsonPath("$.idempotencyKey").value(idempotencyKey.toString()))
-            .andExpect(jsonPath("$.createdAt").isNotEmpty());
-
-        Payment originalPayment = paymentRepository
-            .findByIdempotencyKey(idempotencyKey)
-            .orElseThrow();
-
-        // second same request
-        mockMvc.perform(
-            post("/payments").header(HttpHeaders.AUTHORIZATION, "Bearer " + token).header("Idempotency-key", idempotencyKey.toString()).contentType(MediaType.APPLICATION_JSON).content("""
-                {
-                    "senderWallet": "%s",
-                    "receiverWallet": "%s",
-                    "reference": "%s",
-                    "amount": "%s",
-                    "currency": "%s" 
-                }     
-                """.formatted(one.getId(), two.getId(), "1-2-3-4", "125", "AUD")
-            )
-        )
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.id").value(originalPayment.getId().toString()))
-            .andExpect(jsonPath("$.senderWallet.id").value(one.getId().toString()))
-            .andExpect(jsonPath("$.receiverWallet.id").value(two.getId().toString()))
-            .andExpect(jsonPath("$.reference").value("1-2-3-4"))
-            .andExpect(jsonPath("$.amount").value(125))
-            .andExpect(jsonPath("$.currency").value("AUD"))
-            .andExpect(jsonPath("$.status").value("CREATED"))
-            .andExpect(jsonPath("$.idempotencyKey").value(idempotencyKey.toString()));
+    private org.springframework.test.web.servlet.ResultActions create(
+        Fixture fixture,
+        String key,
+        String body
+    ) throws Exception {
+        return mockMvc.perform(post("/payments")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + fixture.token())
+            .header("Idempotency-Key", key)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(body));
     }
 
-    @Test
-    public void differentBody() throws Exception {
-        User userOne = userService.createUser("Tester", "CUSTOMER");
-        User userTwo = userService.createUser("TesterTwo", "CUSTOMER");
-
-        Wallet one = walletService.createWallet(userOne.getUserId(), "AUD");
-        Wallet two = walletService.createWallet(userTwo.getUserId(), "AUD");
-
-        String token = issueToken(userOne.getUserId());
-        UUID idempotencyKey = UUID.randomUUID();
-
-        // first request
-        mockMvc.perform(
-            post("/payments").header(HttpHeaders.AUTHORIZATION, "Bearer " + token).header("Idempotency-key", idempotencyKey.toString()).contentType(MediaType.APPLICATION_JSON).content("""
-                {
-                    "senderWallet": "%s",
-                    "receiverWallet": "%s",
-                    "reference": "%s",
-                    "amount": "%s",
-                    "currency": "%s" 
-                }     
-                """.formatted(one.getId(), two.getId(), "1-2-3-4", "125", "AUD")
-            )
-        )
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.senderWallet.id").value(one.getId().toString()))
-            .andExpect(jsonPath("$.receiverWallet.id").value(two.getId().toString()))
-            .andExpect(jsonPath("$.amount").value(125))
-            .andExpect(jsonPath("$.currency").value("AUD"))
-            .andExpect(jsonPath("$.idempotencyKey").value(idempotencyKey.toString()));
-
-        // second same request
-        mockMvc.perform(
-            post("/payments").header(HttpHeaders.AUTHORIZATION, "Bearer " + token).header("Idempotency-key", idempotencyKey.toString()).contentType(MediaType.APPLICATION_JSON).content("""
-                {
-                    "senderWallet": "%s",
-                    "receiverWallet": "%s",
-                    "reference": "%s",
-                    "amount": "%s",
-                    "currency": "%s" 
-                }     
-                """.formatted(one.getId(), two.getId(), "1-2-3-4", "126", "AUD")
-            )
-        )
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.error").value("PAYMENT_ALREADY_EXISTS"))
-            .andExpect(jsonPath("$.message").value("The payment already exists"));
+    private String paymentBody(Fixture fixture, String amount,
+        String currency, String reference) {
+        return """
+            {
+              "senderWalletId":"%s",
+              "receiverWalletId":"%s",
+              "amount":%s,
+              "currency":"%s",
+              "reference":"%s"
+            }
+            """.formatted(
+                fixture.sender().getId(),
+                fixture.receiver().getId(),
+                amount,
+                currency,
+                reference
+            );
     }
 
-    @Test
-    public void invalidStateTransition() throws Exception {
-        User userOne = userService.createUser("Tester", "CUSTOMER");
-        User userTwo = userService.createUser("TesterTwo", "CUSTOMER");
-
-        Wallet one = walletService.createWallet(userOne.getUserId(), "AUD");
-        Wallet two = walletService.createWallet(userTwo.getUserId(), "AUD");
-
-        UUID idempotencyKey = UUID.randomUUID();
-
-        Payment payment = paymentService.createPayment(userOne.getUserId(), one.getId(), two.getId(), new BigDecimal(10), "AUD", "1-2-3", idempotencyKey);
-
-        assertThrows(InvalidPaymentTransition.class, () -> payment.transitionTo(PaymentStatus.SETTLED));
-    }
-
-    @Test
-    public void validStateTransition() throws Exception {
-        User userOne = userService.createUser("Tester", "CUSTOMER");
-        User userTwo = userService.createUser("TesterTwo", "CUSTOMER");
-
-        Wallet one = walletService.createWallet(userOne.getUserId(), "AUD");
-        Wallet two = walletService.createWallet(userTwo.getUserId(), "AUD");
-
-        UUID idempotencyKey = UUID.randomUUID();
-
-        Payment payment = paymentService.createPayment(userOne.getUserId(), one.getId(), two.getId(), new BigDecimal(10), "AUD", "1-2-3", idempotencyKey);
-
-        assertDoesNotThrow(() -> payment.transitionTo(PaymentStatus.SCREENING));
-    }
-
-    @Test
-    public void initiatingUserCanFetchPayment() throws Exception {
-        User initiatingUser = userService.createUser("Initiator", "CUSTOMER");
-        User receivingUser = userService.createUser("Receiver", "CUSTOMER");
-
-        Wallet sender = walletService.createWallet(initiatingUser.getUserId(), "AUD");
-        Wallet receiver = walletService.createWallet(receivingUser.getUserId(), "AUD");
-
-        Payment payment = paymentService.createPayment(
-            initiatingUser.getUserId(),
-            sender.getId(),
-            receiver.getId(),
-            new BigDecimal("10.00"),
-            "AUD",
-            "fetch-payment",
-            UUID.randomUUID()
-        );
-
-        String token = issueToken(initiatingUser.getUserId());
-
-        mockMvc.perform(
-            get("/payments/{id}", payment.getId())
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-        )
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.id").value(payment.getId().toString()))
-            .andExpect(jsonPath("$.senderWallet.id").value(sender.getId().toString()))
-            .andExpect(jsonPath("$.receiverWallet.id").value(receiver.getId().toString()))
-            .andExpect(jsonPath("$.amount").value(10.0))
-            .andExpect(jsonPath("$.currency").value("AUD"))
-            .andExpect(jsonPath("$.reference").value("fetch-payment"))
-            .andExpect(jsonPath("$.status").value("CREATED"))
-            .andExpect(jsonPath("$.idempotencyKey").value(payment.getIdempotencyKey().toString()))
-            .andExpect(jsonPath("$.createdAt").isNotEmpty())
-            .andExpect(jsonPath("$.updatedAt").isNotEmpty());
-    }
-
-    @Test
-    public void nonInitiatingUserCannotFetchPayment() throws Exception {
-        User initiatingUser = userService.createUser("Initiator", "CUSTOMER");
-        User receivingUser = userService.createUser("Receiver", "CUSTOMER");
-
-        Wallet sender = walletService.createWallet(initiatingUser.getUserId(), "AUD");
-        Wallet receiver = walletService.createWallet(receivingUser.getUserId(), "AUD");
-
-        Payment payment = paymentService.createPayment(
-            initiatingUser.getUserId(),
-            sender.getId(),
-            receiver.getId(),
-            new BigDecimal("10.00"),
-            "AUD",
-            "protected-payment",
-            UUID.randomUUID()
-        );
-
-        String token = issueToken(receivingUser.getUserId());
-
-        mockMvc.perform(
-            get("/payments/{id}", payment.getId())
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-        )
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.error").value("PAYMENT_ACCESS_DENIED"))
-            .andExpect(jsonPath("$.message").value(
-                "User " + receivingUser.getUserId()
-                    + " does not have access to payment " + payment.getId()
-            ));
-    }
-
-    @Test
-    public void validpaymentCreatedOutboxEvent() throws Exception {
-        User initiatingUser = userService.createUser("Initiator", "CUSTOMER");
-        User receivingUser = userService.createUser("Receiver", "CUSTOMER");
-
-        Wallet sender = walletService.createWallet(initiatingUser.getUserId(), "AUD");
-        Wallet receiver = walletService.createWallet(receivingUser.getUserId(), "AUD");
-
-        Payment payment = paymentService.createPayment(
-            initiatingUser.getUserId(),
-            sender.getId(),
-            receiver.getId(),
-            new BigDecimal("10.00"),
-            "AUD",
-            "protected-payment",
-            UUID.randomUUID()
-        );
-
-        // verify one event was created
-        List<Payment> payments = paymentRepository.findAllById(List.of(payment.getId()));
-        assertEquals(payments.size(), 1);
-
-        // verify one outbox was created
-        List<OutboxEvent> events = outboxEventRepository.
-                                findOutboxEventsByAggregateId(payment.getId());
-
-        assertEquals(events.size(), 1);
-        OutboxEvent event = events.get(0);
-        assertEquals(event.getEventType(), "PAYMENT_CREATED");
-        assertEquals(event.getPublishedAt(), null);
-    }
-
-    @Test
-    public void sameRequestLeavesOneOutboxEvent() throws Exception {
-        User initiatingUser = userService.createUser("Initiator", "CUSTOMER");
-        User receivingUser = userService.createUser("Receiver", "CUSTOMER");
-
-        Wallet sender = walletService.createWallet(initiatingUser.getUserId(), "AUD");
-        Wallet receiver = walletService.createWallet(receivingUser.getUserId(), "AUD");
-
-        String token = issueToken(initiatingUser.getUserId());
-        UUID idempotencyKey = UUID.randomUUID();
-
-        // first request
-        MvcResult result = mockMvc.perform(
-            post("/payments").header(HttpHeaders.AUTHORIZATION, "Bearer " + token).header("Idempotency-key", idempotencyKey.toString()).contentType(MediaType.APPLICATION_JSON).content("""
-                {
-                    "senderWallet": "%s",
-                    "receiverWallet": "%s",
-                    "reference": "%s",
-                    "amount": "%s",
-                    "currency": "%s"
-                }
-                """.formatted(sender.getId(), receiver.getId(), "1-2-3-4", "125", "AUD")
-            )
-        ).andReturn();
-
-        String responsebody = result.getResponse().getContentAsString();
-        JsonNode paymentJson = objectMapper.readTree(responsebody);
-
-        UUID paymentId = UUID.fromString(
-                            paymentJson.get("id").asString()
-                        );
-
-        List<Payment> payments = paymentRepository.findAllById(List.of(paymentId));
-        assertEquals(payments.size(), 1);
-
-        List<OutboxEvent> events = outboxEventRepository.
-                                findOutboxEventsByAggregateId(paymentId);
-        assertEquals(events.size(), 1);
-
-        // attempt the same request
-        result = mockMvc.perform(
-            post("/payments").header(HttpHeaders.AUTHORIZATION, "Bearer " + token).header("Idempotency-key", idempotencyKey.toString()).contentType(MediaType.APPLICATION_JSON).content("""
-                {
-                    "senderWallet": "%s",
-                    "receiverWallet": "%s",
-                    "reference": "%s",
-                    "amount": "%s",
-                    "currency": "%s"
-                }
-                """.formatted(sender.getId(), receiver.getId(), "1-2-3-4", "125", "AUD")
-            )
-        ).andReturn();
-
-        payments = paymentRepository.findAllById(List.of(paymentId));
-        assertEquals(payments.size(), 1);
-
-        events = outboxEventRepository.
-                                findOutboxEventsByAggregateId(paymentId);
-        assertEquals(events.size(), 1);
-    }
+    private record Fixture(
+        User senderUser,
+        Wallet sender,
+        Wallet receiver,
+        String token
+    ) {}
 }
