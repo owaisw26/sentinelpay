@@ -18,6 +18,8 @@ import com.sentinelpay.payments.domain.OutboxEvent;
 import com.sentinelpay.payments.domain.Payment;
 import com.sentinelpay.payments.domain.PaymentStatus;
 import com.sentinelpay.payments.domain.PaymentReservationStatus;
+import com.sentinelpay.payments.domain.ReconciliationDiscrepancyStatus;
+import com.sentinelpay.payments.domain.ReconciliationDiscrepancyType;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.provider.PaymentProviderWebhook;
@@ -28,6 +30,7 @@ import com.sentinelpay.payments.repository.LedgerTransactionRepository;
 import com.sentinelpay.payments.repository.OutboxEventRepository;
 import com.sentinelpay.payments.repository.PaymentRepository;
 import com.sentinelpay.payments.repository.PaymentReservationRepository;
+import com.sentinelpay.payments.repository.ReconciliationDiscrepancyRepository;
 import com.sentinelpay.payments.repository.WalletRepository;
 import com.sentinelpay.payments.repository.WebhookReceiptRepository;
 import com.sentinelpay.payments.service.PaymentService;
@@ -83,6 +86,9 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private WebhookReceiptRepository webhookReceiptRepository;
+
+    @Autowired
+    private ReconciliationDiscrepancyRepository discrepancyRepository;
 
     @Autowired
     private EntityManager entityManager;
@@ -301,6 +307,12 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
         List<LedgerEntry> entries = ledgerEntryRepository
             .findAllByLedgerTransactionId(ledgerTransaction.getId());
         assertEquals(2, entries.size());
+        assertEquals(2, webhookReceiptRepository.findAll().stream()
+            .filter(receipt -> receipt.getProviderPaymentId().equals(
+                settledPayment.getProviderPaymentId()))
+            .findFirst()
+            .orElseThrow()
+            .getDeliveryCount());
         assertEquals(
             0,
             entries.stream()
@@ -308,6 +320,48 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .compareTo(BigDecimal.ZERO)
         );
+    }
+
+    @Test
+    void contradictoryTerminalWebhookCreatesDiscrepancyWithoutReapplyingMoney() {
+        User senderUser = userService.createUser("Contradiction Sender", "CUSTOMER");
+        User receiverUser = userService.createUser("Contradiction Receiver", "CUSTOMER");
+        Wallet sender = walletService.createWallet(senderUser.getUserId(), "AUD");
+        Wallet receiver = walletService.createWallet(receiverUser.getUserId(), "AUD");
+        sender.setBalance(new BigDecimal("100.00"));
+        walletRepository.saveAndFlush(sender);
+
+        Payment payment = paymentService.createPayment(
+            senderUser.getUserId(), sender.getId(), receiver.getId(),
+            new BigDecimal("25.00"), "AUD",
+            "contradictory-" + UUID.randomUUID(), UUID.randomUUID()
+        );
+        OutboxEvent event = outboxEventRepository
+            .findOutboxEventsByAggregateId(payment.getId()).getFirst();
+        PaymentEventProcessor processor = new PaymentEventProcessor(
+            paymentProcessingService,
+            new FakePaymentProvider(
+                "CONTRADICTORY_STATUS", paymentWebhookProcessor
+            )
+        );
+
+        processor.process(toMessage(event));
+        entityManager.flush();
+        entityManager.clear();
+
+        Payment settled = paymentRepository.findById(payment.getId()).orElseThrow();
+        Wallet updatedSender = walletRepository.findById(sender.getId()).orElseThrow();
+        Wallet updatedReceiver = walletRepository.findById(receiver.getId()).orElseThrow();
+        assertEquals(PaymentStatus.SETTLED, settled.getStatus());
+        assertEquals(0, new BigDecimal("75.00").compareTo(updatedSender.getBalance()));
+        assertEquals(0, new BigDecimal("25.00").compareTo(updatedReceiver.getBalance()));
+        assertEquals(1, ledgerTransactionRepository.findAll().stream()
+            .filter(transaction -> payment.getId().equals(transaction.getPaymentId()))
+            .count());
+        assertEquals(ReconciliationDiscrepancyType.CONTRADICTORY_PROVIDER_STATUS,
+            discrepancyRepository.findByPaymentIdAndStatus(
+                payment.getId(), ReconciliationDiscrepancyStatus.OPEN
+            ).orElseThrow().getType());
     }
 
     private OutboxMessage toMessage(OutboxEvent event) {

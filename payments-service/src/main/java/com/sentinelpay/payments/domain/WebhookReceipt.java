@@ -30,6 +30,12 @@ public class WebhookReceipt {
     @Column(name = "processed_at")
     private LocalDateTime processedAt;
 
+    @Column(name = "delivery_count", nullable = false)
+    private int deliveryCount;
+
+    @Column(name = "last_received_at", nullable = false)
+    private LocalDateTime lastReceivedAt;
+
     protected WebhookReceipt() {}
 
     public UUID getProviderEventId() {
@@ -54,5 +60,13 @@ public class WebhookReceipt {
 
     public LocalDateTime getProcessedAt() {
         return processedAt;
+    }
+
+    public int getDeliveryCount() {
+        return deliveryCount;
+    }
+
+    public LocalDateTime getLastReceivedAt() {
+        return lastReceivedAt;
     }
 }

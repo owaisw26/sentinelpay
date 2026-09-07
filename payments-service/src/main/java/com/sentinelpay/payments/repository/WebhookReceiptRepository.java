@@ -20,12 +20,14 @@ public interface WebhookReceiptRepository
             provider_payment_id,
             event_status,
             payload_sha256,
-            received_at
+            received_at,
+            last_received_at
         ) VALUES (
             :eventId,
             :providerPaymentId,
             :eventStatus,
             :payloadSha256,
+            :receivedAt,
             :receivedAt
         )
         ON CONFLICT (provider_event_id) DO NOTHING
@@ -47,5 +49,17 @@ public interface WebhookReceiptRepository
     int markProcessed(
         @Param("eventId") UUID eventId,
         @Param("processedAt") LocalDateTime processedAt
+    );
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+        update WebhookReceipt receipt
+        set receipt.deliveryCount = receipt.deliveryCount + 1,
+            receipt.lastReceivedAt = :receivedAt
+        where receipt.providerEventId = :eventId
+        """)
+    int recordDuplicateDelivery(
+        @Param("eventId") UUID eventId,
+        @Param("receivedAt") LocalDateTime receivedAt
     );
 }

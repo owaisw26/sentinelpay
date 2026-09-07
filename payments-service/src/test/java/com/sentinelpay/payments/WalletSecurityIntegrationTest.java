@@ -125,6 +125,30 @@ public class WalletSecurityIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void customerCannotAccessReconciliationEndpoints() throws Exception {
+        User customer = userService.createUser("Reconciliation Customer", "CUSTOMER");
+        String token = issueToken(customer.getUserId());
+
+        mockMvc.perform(
+            get("/analyst/reconciliation/discrepancies")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+        ).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void analystCanReadReconciliationDiscrepancies() throws Exception {
+        User analyst = userService.createUser("Reconciliation Analyst", "ANALYST");
+        String token = issueToken(analyst.getUserId());
+
+        mockMvc.perform(
+            get("/analyst/reconciliation/discrepancies")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+        ).andExpect(status().isOk())
+            .andExpect(jsonPath("$.items").isArray())
+            .andExpect(jsonPath("$.nextCursor").doesNotExist());
+    }
+
+    @Test
     void customerCanAccessAnalystEndpoint() throws Exception {
         User customerOne = userService.createUser("TesterOne", "ANALYST");
         String token = issueToken(customerOne.getUserId());

@@ -1,7 +1,10 @@
 package com.sentinelpay.payments.repository;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
+import java.time.LocalDateTime;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -23,5 +26,31 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID>{
     @Query("select p from Payment p where p.providerPaymentId = :providerPaymentId")
     Optional<Payment> findByProviderPaymentIdForUpdate(
         @Param("providerPaymentId") String providerPaymentId
+    );
+
+    @Query("""
+        select p from Payment p
+        where p.status = com.sentinelpay.payments.domain.PaymentStatus.PROCESSING
+          and p.updatedAt < :cutoff
+        order by p.updatedAt, p.id
+        """)
+    List<Payment> findFirstReconciliationCandidates(
+        @Param("cutoff") LocalDateTime cutoff,
+        Pageable pageable
+    );
+
+    @Query("""
+        select p from Payment p
+        where p.status = com.sentinelpay.payments.domain.PaymentStatus.PROCESSING
+          and p.updatedAt < :cutoff
+          and (p.updatedAt > :cursorUpdatedAt
+            or (p.updatedAt = :cursorUpdatedAt and p.id > :cursorId))
+        order by p.updatedAt, p.id
+        """)
+    List<Payment> findReconciliationCandidatesAfter(
+        @Param("cutoff") LocalDateTime cutoff,
+        @Param("cursorUpdatedAt") LocalDateTime cursorUpdatedAt,
+        @Param("cursorId") UUID cursorId,
+        Pageable pageable
     );
 }

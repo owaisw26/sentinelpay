@@ -10,6 +10,8 @@ public interface PaymentProvider {
         UUID providerIdempotencyKey
     );
 
+    PaymentProviderLookupResult lookupPayment(UUID providerIdempotencyKey);
+
     default void afterProcessingCompleted(
         Payment payment,
         PaymentProviderResponse response

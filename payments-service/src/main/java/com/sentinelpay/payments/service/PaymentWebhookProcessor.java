@@ -9,10 +9,13 @@ import com.sentinelpay.payments.domain.PaymentStatus;
 import com.sentinelpay.payments.domain.WebhookReceipt;
 import com.sentinelpay.payments.exception.ConflictingWebhookEventException;
 import com.sentinelpay.payments.exception.InvalidWebhookPayloadException;
+import com.sentinelpay.payments.provider.PaymentProviderLookupStatus;
 import com.sentinelpay.payments.provider.PaymentProviderWebhook;
+import com.sentinelpay.payments.provider.PaymentProviderWebhookStatus;
 import com.sentinelpay.payments.repository.PaymentRepository;
 import com.sentinelpay.payments.repository.WebhookReceiptRepository;
 import com.sentinelpay.payments.security.PayloadHasher;
+import com.sentinelpay.payments.service.reconciliation.ReconciliationPersistenceService;
 
 import jakarta.transaction.Transactional;
 
@@ -21,15 +24,18 @@ public class PaymentWebhookProcessor {
     private final PaymentRepository paymentRepository;
     private final WebhookReceiptRepository webhookReceiptRepository;
     private final LedgerService ledgerService;
+    private final ReconciliationPersistenceService reconciliationService;
 
     public PaymentWebhookProcessor(
         PaymentRepository paymentRepository,
         WebhookReceiptRepository webhookReceiptRepository,
-        LedgerService ledgerService
+        LedgerService ledgerService,
+        ReconciliationPersistenceService reconciliationService
     ) {
         this.paymentRepository = paymentRepository;
         this.webhookReceiptRepository = webhookReceiptRepository;
         this.ledgerService = ledgerService;
+        this.reconciliationService = reconciliationService;
     }
 
     @Transactional
@@ -58,9 +64,13 @@ public class PaymentWebhookProcessor {
                 .orElseThrow();
             if (!existing.getProviderPaymentId().equals(
                     webhook.providerPaymentId()) ||
-                !existing.getEventStatus().equals(webhook.status().name())) {
+                !existing.getEventStatus().equals(webhook.status().name()) ||
+                !existing.getPayloadSha256().equals(payloadHash)) {
                 throw new ConflictingWebhookEventException();
             }
+            webhookReceiptRepository.recordDuplicateDelivery(
+                webhook.eventId(), now
+            );
             return;
         }
 
@@ -71,6 +81,14 @@ public class PaymentWebhookProcessor {
 
         if (payment.getStatus() == PaymentStatus.SETTLED ||
             payment.getStatus() == PaymentStatus.FAILED) {
+            if (isContradictory(payment.getStatus(), webhook.status())) {
+                reconciliationService.recordContradictoryWebhook(
+                    payment.getId(),
+                    payment.getStatus(),
+                    toLookupStatus(webhook.status()),
+                    webhook.eventId()
+                );
+            }
             webhookReceiptRepository.markProcessed(webhook.eventId(), now);
             return;
         }
@@ -93,6 +111,29 @@ public class PaymentWebhookProcessor {
             }
         }
         webhookReceiptRepository.markProcessed(webhook.eventId(), now);
+        reconciliationService.closeOpenDiscrepancyFromWebhook(
+            payment.getId(),
+            toLookupStatus(webhook.status()),
+            webhook.eventId()
+        );
+    }
+
+    private boolean isContradictory(
+        PaymentStatus localStatus,
+        PaymentProviderWebhookStatus providerStatus
+    ) {
+        return (localStatus == PaymentStatus.SETTLED &&
+                providerStatus == PaymentProviderWebhookStatus.DECLINED) ||
+            (localStatus == PaymentStatus.FAILED &&
+                providerStatus == PaymentProviderWebhookStatus.SUCCEEDED);
+    }
+
+    private PaymentProviderLookupStatus toLookupStatus(
+        PaymentProviderWebhookStatus status
+    ) {
+        return status == PaymentProviderWebhookStatus.SUCCEEDED
+            ? PaymentProviderLookupStatus.SUCCEEDED
+            : PaymentProviderLookupStatus.DECLINED;
     }
 
     private void validate(PaymentProviderWebhook webhook, String payloadHash) {

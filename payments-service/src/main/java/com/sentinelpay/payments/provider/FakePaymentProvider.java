@@ -17,6 +17,8 @@ public class FakePaymentProvider implements PaymentProvider{
     private final PaymentWebhookProcessor webhookProcessor;
 
     private final Map<UUID, PaymentProviderResponse> processedPayments = new ConcurrentHashMap<>();
+    private final Map<UUID, PaymentProviderLookupStatus> providerStatuses =
+        new ConcurrentHashMap<>();
     private final Map<UUID, UUID> webhookEventIds = new ConcurrentHashMap<>();
 
     @Autowired
@@ -44,20 +46,62 @@ public class FakePaymentProvider implements PaymentProvider{
             );
         }
 
-        return switch (mode) {
-            case SUCCESS -> accepted(providerIdempotencyKey);
+        PaymentProviderResponse accepted = accepted(providerIdempotencyKey);
+        switch (mode) {
+            case SUCCESS -> providerStatuses.putIfAbsent(
+                providerIdempotencyKey,
+                PaymentProviderLookupStatus.PENDING
+            );
+
+            case MISSING_WEBHOOK_SUCCESS, DUPLICATE_WEBHOOK ->
+                providerStatuses.put(
+                    providerIdempotencyKey,
+                    PaymentProviderLookupStatus.SUCCEEDED
+                );
 
             // The PSP accepted the request for asynchronous processing. Its
             // final decline is delivered through the webhook callback below.
-            case DECLINE -> accepted(providerIdempotencyKey);
+            case DECLINE, MISSING_WEBHOOK_DECLINE -> providerStatuses.put(
+                providerIdempotencyKey,
+                PaymentProviderLookupStatus.DECLINED
+            );
 
-            case TIMEOUT ->
+            case TIMEOUT -> {
+                providerStatuses.putIfAbsent(
+                    providerIdempotencyKey,
+                    PaymentProviderLookupStatus.PENDING
+                );
                 throw new PaymentProviderTimeoutException(
                     "Fake PSP timed out"
                 );
 
-            case DUPLICATE_WEBHOOK -> accepted(providerIdempotencyKey);
-        };
+            }
+            case CONTRADICTORY_STATUS -> providerStatuses.put(
+                providerIdempotencyKey,
+                PaymentProviderLookupStatus.SUCCEEDED
+            );
+        }
+        return accepted;
+    }
+
+    @Override
+    public PaymentProviderLookupResult lookupPayment(UUID providerIdempotencyKey) {
+        PaymentProviderResponse response = processedPayments.get(
+            providerIdempotencyKey
+        );
+        if (response == null) {
+            return new PaymentProviderLookupResult(
+                null,
+                PaymentProviderLookupStatus.NOT_FOUND
+            );
+        }
+        return new PaymentProviderLookupResult(
+            response.providerPaymentId(),
+            providerStatuses.getOrDefault(
+                providerIdempotencyKey,
+                PaymentProviderLookupStatus.PENDING
+            )
+        );
     }
 
     @Override
@@ -84,9 +128,27 @@ public class FakePaymentProvider implements PaymentProvider{
                 webhookProcessor.process(webhook);
                 webhookProcessor.process(webhook);
             }
-            case SUCCESS, TIMEOUT -> {
+            case CONTRADICTORY_STATUS -> {
+                webhookProcessor.process(createWebhook(
+                    payment,
+                    response,
+                    PaymentProviderWebhookStatus.SUCCEEDED
+                ));
+                providerStatuses.put(
+                    payment.getId(),
+                    PaymentProviderLookupStatus.DECLINED
+                );
+                webhookProcessor.process(new PaymentProviderWebhook(
+                    UUID.randomUUID(),
+                    response.providerPaymentId(),
+                    PaymentProviderWebhookStatus.DECLINED
+                ));
+            }
+            case SUCCESS, MISSING_WEBHOOK_SUCCESS,
+                MISSING_WEBHOOK_DECLINE, TIMEOUT -> {
                 // SUCCESS remains accepted until a webhook is supplied by the
-                // caller; TIMEOUT never reaches this callback.
+                // caller. Missing-webhook modes intentionally emit nothing,
+                // and TIMEOUT never reaches this callback.
             }
         }
     }

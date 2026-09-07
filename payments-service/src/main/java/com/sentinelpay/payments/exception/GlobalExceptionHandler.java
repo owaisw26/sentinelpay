@@ -130,6 +130,39 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         );
     }
 
+    @ExceptionHandler(ReconciliationNotFoundException.class)
+    public ProblemDetail handleReconciliationNotFound(
+        ReconciliationNotFoundException exception
+    ) {
+        return problem(
+            HttpStatus.NOT_FOUND,
+            "RECONCILIATION_DISCREPANCY_NOT_FOUND",
+            exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(ReconciliationConflictException.class)
+    public ProblemDetail handleReconciliationConflict(
+        ReconciliationConflictException exception
+    ) {
+        return problem(
+            HttpStatus.CONFLICT,
+            "RECONCILIATION_CONFLICT",
+            exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(InvalidReconciliationRequestException.class)
+    public ProblemDetail handleInvalidReconciliationRequest(
+        InvalidReconciliationRequestException exception
+    ) {
+        return problem(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_RECONCILIATION_REQUEST",
+            exception.getMessage()
+        );
+    }
+
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(
         MethodArgumentNotValidException exception,
