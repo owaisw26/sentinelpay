@@ -189,11 +189,29 @@ class PayeeVerificationIntegrationTest extends AbstractIntegrationTest {
             "select registry_version from payee_checks where id = ?",
             Integer.class, checkId
         );
+        assertFalse(payeeCheckRepository.findRecentSuccessfulChecks(
+            fixture.senderUser().getUserId(), fixture.receiver().getId(),
+            registryVersion, PayloadHasher.sha256("age target"),
+            PayeeCheckOutcome.MATCH, java.time.LocalDateTime.now().minusHours(24),
+            PageRequest.ofSize(1)
+        ).isEmpty());
         entityManager.flush();
         jdbcTemplate.update(
             "update payee_checks set created_at = now() - interval '25 hours' "
                 + "where id = ?",
             checkId
+        );
+        jdbcTemplate.update("""
+            insert into payee_checks (
+                id, requester_user_id, receiver_wallet_id, registry_version,
+                supplied_name_hash, outcome, reason_code, created_at,
+                expires_at, consumed_at, verification_source
+            ) values (?, ?, ?, ?, ?, 'MATCH', 'NAME_MATCHED', now(),
+                now() + interval '15 minutes', null, 'DEGRADED_REUSE')
+            """,
+            UUID.randomUUID(), fixture.senderUser().getUserId(),
+            fixture.receiver().getId(), registryVersion,
+            PayloadHasher.sha256("age target")
         );
         entityManager.clear();
 

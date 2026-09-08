@@ -43,8 +43,6 @@ class PayeeCheckDegradationTest {
     private final PayeeNameMatcher matcher = mock(PayeeNameMatcher.class);
     private final PayeeNameVerificationGateway gateway =
         mock(PayeeNameVerificationGateway.class);
-    private final RateLimitService rateLimitService =
-        mock(RateLimitService.class);
     private final PayeeNameCheckCache cache = new PayeeNameCheckCache(
         10, Duration.ofMinutes(5)
     );
@@ -79,7 +77,7 @@ class PayeeCheckDegradationTest {
             .thenAnswer(invocation -> invocation.getArgument(0));
         service = new PayeeCheckService(
             checkRepository, registryRepository, walletRepository, matcher,
-            gateway, cache, rateLimitService, Duration.ofMinutes(15),
+            gateway, cache, Duration.ofMinutes(15),
             Duration.ofHours(24)
         );
     }
@@ -133,6 +131,33 @@ class PayeeCheckDegradationTest {
             PayeeCheckVerificationSource.DEGRADED_REUSE,
             result.getVerificationSource()
         );
+    }
+
+    @Test
+    void degradedReuseCannotRefreshTheFallbackWindow() {
+        when(gateway.verify("alice example", "Alice Example"))
+            .thenThrow(new PayeeVerificationUnavailableException());
+        PayeeCheck degraded = new PayeeCheck(
+            UUID.randomUUID(), requesterId, receiverId, 3,
+            PayloadHasher.sha256("alice example"), PayeeCheckOutcome.MATCH,
+            PayeeCheckReason.NAME_MATCHED, LocalDateTime.now().minusHours(1),
+            LocalDateTime.now().minusMinutes(45),
+            PayeeCheckVerificationSource.DEGRADED_REUSE
+        );
+        when(checkRepository.findRecentSuccessfulChecks(
+            eq(requesterId), eq(receiverId), eq(3),
+            eq(PayloadHasher.sha256("alice example")),
+            eq(PayeeCheckOutcome.MATCH), any(LocalDateTime.class),
+            any(Pageable.class)
+        )).thenReturn(java.util.List.of(degraded));
+
+        assertThrows(
+            PayeeVerificationUnavailableException.class,
+            () -> service.createCheck(
+                requesterId, receiverId, "Alice Example"
+            )
+        );
+        verify(checkRepository, never()).saveAndFlush(any(PayeeCheck.class));
     }
 
     @Test

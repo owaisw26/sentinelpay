@@ -14,9 +14,12 @@ latency without allowing an unavailable verifier to become an implicit approval.
 
 Use a PostgreSQL fixed-window counter keyed by customer and operation. PostgreSQL
 calculates the window from its own clock and updates the counter with one atomic
-upsert. Limit accounting runs in an independent transaction, so a later request
-failure cannot erase the attempt. Rejected requests return `429` and the database-
-derived number of seconds until the next window in `Retry-After`.
+upsert. An authenticated MVC interceptor performs limit accounting before body
+binding and before a transactional service method opens its transaction. The
+counter update therefore completes without suspending a transaction that holds
+another pool connection, and malformed or validation-invalid requests still
+consume quota. Rejected requests return `429` and the database-derived number of
+seconds until the next window in `Retry-After`.
 
 Cache NameCheck match results in a bounded Caffeine cache keyed by registry
 version, receiver wallet, and canonical supplied name. Entries expire after a
@@ -26,8 +29,10 @@ barrier.
 
 If the verifier is unavailable on a cache miss, allow only a prior `MATCH` for
 the same customer, receiver, registry version, and canonical-name hash created
-within 24 hours. Persist the new check with `DEGRADED_REUSE` provenance. All
-first-time, renamed, mismatched, and older checks fail closed with `503`.
+within 24 hours. A `DEGRADED_REUSE` result is never eligible to anchor another
+fallback, so an outage cannot refresh the trust window indefinitely. Persist the
+new check with `DEGRADED_REUSE` provenance. All first-time, renamed, mismatched,
+and older checks fail closed with `503`.
 
 ## Alternatives considered
 

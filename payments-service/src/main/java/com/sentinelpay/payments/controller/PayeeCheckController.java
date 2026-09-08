@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.sentinelpay.payments.controller.request.PayeeCheckRequest;
 import com.sentinelpay.payments.controller.response.PayeeCheckResponse;
 import com.sentinelpay.payments.service.PayeeCheckService;
+import com.sentinelpay.payments.service.RateLimitOperation;
+import com.sentinelpay.payments.service.RateLimited;
 
 import jakarta.validation.Valid;
 
@@ -27,6 +29,7 @@ public class PayeeCheckController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @RateLimited(RateLimitOperation.PAYEE_CHECK)
     public PayeeCheckResponse createCheck(
         @Valid @RequestBody PayeeCheckRequest request,
         Authentication authentication

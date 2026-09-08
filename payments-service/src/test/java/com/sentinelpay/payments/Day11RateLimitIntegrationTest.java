@@ -130,6 +130,42 @@ class Day11RateLimitIntegrationTest extends AbstractIntegrationTest {
         }
     }
 
+    @Test
+    void malformedAuthenticatedRequestsConsumeQuotaBeforeBodyBinding()
+        throws Exception {
+        User user = userService.createCustomer("Malformed Limited Sender");
+        String token = issueToken(user.getUserId());
+
+        mockMvc.perform(post("/payee-checks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{"))
+            .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/payee-checks")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{"))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/payee-checks")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isTooManyRequests())
+            .andExpect(header().exists(HttpHeaders.RETRY_AFTER));
+
+        mockMvc.perform(post("/payments")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .header("Idempotency-Key", "malformed-first")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{"))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/payments")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isTooManyRequests())
+            .andExpect(header().exists(HttpHeaders.RETRY_AFTER));
+    }
+
     private boolean increment(UUID subject, CountDownLatch ready,
         CountDownLatch start) throws Exception {
         ready.countDown();

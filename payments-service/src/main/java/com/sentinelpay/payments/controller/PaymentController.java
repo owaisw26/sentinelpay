@@ -17,6 +17,8 @@ import com.sentinelpay.payments.controller.request.PaymentRequest;
 import com.sentinelpay.payments.controller.response.PaymentResponse;
 import com.sentinelpay.payments.service.PaymentCreationResult;
 import com.sentinelpay.payments.service.PaymentService;
+import com.sentinelpay.payments.service.RateLimitOperation;
+import com.sentinelpay.payments.service.RateLimited;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -35,6 +37,7 @@ public class PaymentController {
     }
 
     @PostMapping()
+    @RateLimited(RateLimitOperation.PAYMENT_CREATE)
     public ResponseEntity<PaymentResponse> createPayment(
         @RequestHeader("Idempotency-Key")
         @NotBlank @Size(max = 128) String idempotencyKey,

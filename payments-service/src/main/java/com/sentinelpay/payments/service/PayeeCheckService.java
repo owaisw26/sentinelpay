@@ -33,7 +33,6 @@ public class PayeeCheckService {
     private final PayeeNameMatcher nameMatcher;
     private final PayeeNameVerificationGateway verificationGateway;
     private final PayeeNameCheckCache nameCheckCache;
-    private final RateLimitService rateLimitService;
     private final Duration checkTtl;
     private final Duration degradedReuseMaximumAge;
 
@@ -44,7 +43,6 @@ public class PayeeCheckService {
         PayeeNameMatcher nameMatcher,
         PayeeNameVerificationGateway verificationGateway,
         PayeeNameCheckCache nameCheckCache,
-        RateLimitService rateLimitService,
         @Value("${sentinelpay.payee-check.ttl:PT15M}") Duration checkTtl,
         @Value("${sentinelpay.payee-check.degraded-reuse-max-age:PT24H}")
         Duration degradedReuseMaximumAge
@@ -55,7 +53,6 @@ public class PayeeCheckService {
         this.nameMatcher = nameMatcher;
         this.verificationGateway = verificationGateway;
         this.nameCheckCache = nameCheckCache;
-        this.rateLimitService = rateLimitService;
         if (checkTtl.isZero() || checkTtl.isNegative()
             || degradedReuseMaximumAge.isZero()
             || degradedReuseMaximumAge.isNegative()) {
@@ -70,9 +67,6 @@ public class PayeeCheckService {
     @Transactional
     public PayeeCheck createCheck(UUID requesterUserId, UUID receiverWalletId,
         String suppliedName) {
-        rateLimitService.consume(
-            requesterUserId, RateLimitOperation.PAYEE_CHECK
-        );
         if (requesterUserId == null || receiverWalletId == null
             || suppliedName == null || suppliedName.isBlank()
             || suppliedName.length() > 200) {
@@ -201,7 +195,10 @@ public class PayeeCheckService {
             PayeeCheckOutcome.MATCH,
             now.minus(degradedReuseMaximumAge),
             PageRequest.ofSize(1)
-        ).stream().findFirst()
+        ).stream()
+            .filter(check -> check.getVerificationSource()
+                != PayeeCheckVerificationSource.DEGRADED_REUSE)
+            .findFirst()
             .orElseThrow(PayeeVerificationUnavailableException::new);
         return new MatchResult(previous.getOutcome(), previous.getReasonCode());
     }

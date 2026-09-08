@@ -28,6 +28,8 @@ public interface PayeeCheckRepository extends JpaRepository<PayeeCheck, UUID> {
           and c.registryVersion = :registryVersion
           and c.suppliedNameHash = :suppliedNameHash
           and c.outcome = :outcome
+          and c.verificationSource <>
+            com.sentinelpay.payments.domain.PayeeCheckVerificationSource.DEGRADED_REUSE
           and c.createdAt >= :notBefore
         order by c.createdAt desc
         """)
