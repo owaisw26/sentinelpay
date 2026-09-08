@@ -65,6 +65,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         );
     }
 
+    @ExceptionHandler(InvalidPayeeCheckException.class)
+    public ProblemDetail handleInvalidPayeeCheck(
+        InvalidPayeeCheckException exception
+    ) {
+        return problem(
+            HttpStatus.UNPROCESSABLE_CONTENT,
+            exception.getErrorCode(),
+            exception.getMessage()
+        );
+    }
+
     @ExceptionHandler(PaymentAlreadyExistsException.class)
     public ProblemDetail handlePaymentAlreadyExists(
         PaymentAlreadyExistsException exception

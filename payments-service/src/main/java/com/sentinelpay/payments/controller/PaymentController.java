@@ -49,6 +49,8 @@ public class PaymentController {
                 paymentRequest.amount(),
                 paymentRequest.currency(),
                 paymentRequest.reference(),
+                paymentRequest.payeeCheckId(),
+                paymentRequest.acceptNameMismatch(),
                 idempotencyKey
             );
 

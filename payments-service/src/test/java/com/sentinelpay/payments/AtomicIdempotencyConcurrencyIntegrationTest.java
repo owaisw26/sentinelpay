@@ -25,6 +25,7 @@ import com.sentinelpay.payments.repository.OutboxEventRepository;
 import com.sentinelpay.payments.repository.PaymentRepository;
 import com.sentinelpay.payments.service.PaymentCreationResult;
 import com.sentinelpay.payments.service.PaymentService;
+import com.sentinelpay.payments.service.PayeeCheckService;
 import com.sentinelpay.payments.service.UserService;
 import com.sentinelpay.payments.service.WalletService;
 
@@ -42,6 +43,9 @@ class AtomicIdempotencyConcurrencyIntegrationTest
     private PaymentService paymentService;
 
     @Autowired
+    private PayeeCheckService payeeCheckService;
+
+    @Autowired
     private PaymentRepository paymentRepository;
 
     @Autowired
@@ -55,6 +59,7 @@ class AtomicIdempotencyConcurrencyIntegrationTest
     private Wallet sender;
     private Wallet receiver;
     private UUID paymentId;
+    private UUID payeeCheckId;
 
     @Test
     void concurrentFirstRequestsCreateOnePaymentAndOneOutboxEvent()
@@ -63,6 +68,9 @@ class AtomicIdempotencyConcurrencyIntegrationTest
         receiverUser = userService.createCustomer("Idempotent Receiver");
         sender = walletService.createWallet(senderUser.getUserId(), "AUD");
         receiver = walletService.createWallet(receiverUser.getUserId(), "AUD");
+        payeeCheckId = payeeCheckService.createCheck(
+            senderUser.getUserId(), receiver.getId(), "Idempotent Receiver"
+        ).getId();
         String key = "concurrent-key-" + UUID.randomUUID();
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
@@ -106,7 +114,8 @@ class AtomicIdempotencyConcurrencyIntegrationTest
         }
         return paymentService.createPayment(
             senderUser.getUserId(), sender.getId(), receiver.getId(),
-            new BigDecimal("15.00"), "AUD", "concurrent", key
+            new BigDecimal("15.00"), "AUD", "concurrent", payeeCheckId,
+            false, key
         );
     }
 
@@ -122,6 +131,15 @@ class AtomicIdempotencyConcurrencyIntegrationTest
                 paymentId
             );
             jdbcTemplate.update("delete from payments where id = ?", paymentId);
+        }
+        if (payeeCheckId != null) {
+            jdbcTemplate.update("delete from payee_checks where id = ?", payeeCheckId);
+        }
+        if (receiver != null) {
+            jdbcTemplate.update(
+                "delete from payee_registry_entries where receiver_wallet_id = ?",
+                receiver.getId()
+            );
         }
         if (sender != null) {
             jdbcTemplate.update("delete from wallets where id = ?", sender.getId());

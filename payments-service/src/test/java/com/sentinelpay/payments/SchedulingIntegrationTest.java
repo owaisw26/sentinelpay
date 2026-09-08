@@ -150,6 +150,15 @@ class SchedulingIntegrationTest {
                 payment.getId()
             );
             paymentRepository.deleteAllById(List.of(payment.getId()));
+            paymentRepository.flush();
+            jdbcTemplate.update(
+                "delete from payee_checks where id = ?",
+                payment.getPayeeCheckId()
+            );
+            jdbcTemplate.update(
+                "delete from payee_registry_entries where receiver_wallet_id = ?",
+                receiver.getId()
+            );
             walletRepository.deleteAllById(List.of(sender.getId(), receiver.getId()));
             userRepository.deleteAllById(List.of(
                 senderUser.getUserId(),

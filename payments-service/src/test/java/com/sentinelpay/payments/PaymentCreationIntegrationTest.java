@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.repository.PaymentRepository;
+import com.sentinelpay.payments.service.PayeeCheckService;
 import com.sentinelpay.payments.service.UserService;
 import com.sentinelpay.payments.service.WalletService;
 
@@ -42,6 +43,9 @@ class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private PaymentRepository paymentRepository;
+
+    @Autowired
+    private PayeeCheckService payeeCheckService;
 
     @Test
     void identicalRetryReturnsExactOriginalBodyAndReplayHeader() throws Exception {
@@ -149,7 +153,10 @@ class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
         User receiverUser = userService.createCustomer("Payment Receiver");
         Wallet sender = walletService.createWallet(senderUser.getUserId(), "AUD");
         Wallet receiver = walletService.createWallet(receiverUser.getUserId(), "AUD");
-        return new Fixture(senderUser, sender, receiver,
+        UUID payeeCheckId = payeeCheckService.createCheck(
+            senderUser.getUserId(), receiver.getId(), "Payment Receiver"
+        ).getId();
+        return new Fixture(senderUser, sender, receiver, payeeCheckId,
             issueToken(senderUser.getUserId()));
     }
 
@@ -179,14 +186,17 @@ class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
               "receiverWalletId":"%s",
               "amount":%s,
               "currency":"%s",
-              "reference":"%s"
+              "reference":"%s",
+              "payeeCheckId":"%s",
+              "acceptNameMismatch":false
             }
             """.formatted(
                 fixture.sender().getId(),
                 fixture.receiver().getId(),
                 amount,
                 currency,
-                reference
+                reference,
+                fixture.payeeCheckId()
             );
     }
 
@@ -194,6 +204,7 @@ class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
         User senderUser,
         Wallet sender,
         Wallet receiver,
+        UUID payeeCheckId,
         String token
     ) {}
 }

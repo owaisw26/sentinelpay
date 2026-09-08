@@ -78,6 +78,12 @@ public class Payment {
     @Column(name = "request_hash", nullable = false)
     private String requestHash;
 
+    @Column(name = "payee_check_id", nullable = false)
+    private UUID payeeCheckId;
+
+    @Column(name = "accepted_name_mismatch", nullable = false)
+    private boolean acceptedNameMismatch;
+
     @Column(name = "provider_payment_id", unique = true)
     private String providerPaymentId;
 
@@ -127,6 +133,14 @@ public class Payment {
         return requestHash;
     }
 
+    public UUID getPayeeCheckId() {
+        return payeeCheckId;
+    }
+
+    public boolean isAcceptedNameMismatch() {
+        return acceptedNameMismatch;
+    }
+
     public String getProviderPaymentId() {
         return providerPaymentId;
     }
@@ -159,5 +173,14 @@ public class Payment {
         }
 
         this.providerPaymentId = providerPaymentId;
+    }
+
+    public void attachPayeeCheck(UUID payeeCheckId,
+        boolean acceptedNameMismatch) {
+        if (this.payeeCheckId != null) {
+            throw new IllegalStateException("Payment already has a payee check");
+        }
+        this.payeeCheckId = payeeCheckId;
+        this.acceptedNameMismatch = acceptedNameMismatch;
     }
 }

@@ -38,34 +38,30 @@ public class PaymentService {
     private final WalletService walletService;
     private final OutboxEventRepository outboxEventRepository;
     private final ApiIdempotencyRepository idempotencyRepository;
+    private final PayeeCheckService payeeCheckService;
     private final ObjectMapper objectMapper;
 
     public PaymentService(PaymentRepository paymentRepository,
         WalletService walletService,
         OutboxEventRepository outboxEventRepository,
         ApiIdempotencyRepository idempotencyRepository,
+        PayeeCheckService payeeCheckService,
         ObjectMapper objectMapper) {
         this.paymentRepository = paymentRepository;
         this.walletService = walletService;
         this.outboxEventRepository = outboxEventRepository;
         this.idempotencyRepository = idempotencyRepository;
+        this.payeeCheckService = payeeCheckService;
         this.objectMapper = objectMapper;
     }
 
     @Transactional
     public PaymentCreationResult createPayment(UUID userId,
         UUID senderWalletId, UUID receiverWalletId, BigDecimal amount,
-        String currency, String reference, String idempotencyKey) {
+        String currency, String reference, UUID payeeCheckId,
+        boolean acceptNameMismatch, String idempotencyKey) {
         validateInput(senderWalletId, receiverWalletId, amount, currency,
-            reference, idempotencyKey);
-
-        Wallet sender = walletService.getWallet(senderWalletId);
-        Wallet receiver = walletService.getWallet(receiverWalletId);
-
-        if (!sender.getUser().getUserId().equals(userId)) {
-            throw new WalletNotFoundException(senderWalletId);
-        }
-        validateWalletCurrencies(sender, receiver);
+            reference, payeeCheckId, idempotencyKey);
 
         String requestHash = hashContent(String.join(
             "\u001f",
@@ -74,7 +70,9 @@ public class PaymentService {
             receiverWalletId.toString(),
             amount.stripTrailingZeros().toPlainString(),
             currency,
-            reference
+            reference,
+            payeeCheckId.toString(),
+            Boolean.toString(acceptNameMismatch)
         ));
         LocalDateTime now = LocalDateTime.now();
 
@@ -85,10 +83,24 @@ public class PaymentService {
             return replay(userId, idempotencyKey, requestHash);
         }
 
+        Wallet sender = walletService.getWallet(senderWalletId);
+        Wallet receiver = walletService.getWallet(receiverWalletId);
+
+        if (!sender.getUser().getUserId().equals(userId)) {
+            throw new WalletNotFoundException(senderWalletId);
+        }
+        validateWalletCurrencies(sender, receiver);
+        var payeeCheck = payeeCheckService.authorizeForPayment(
+            payeeCheckId, userId, receiverWalletId, acceptNameMismatch
+        );
+
         Payment payment = new Payment(
             UUID.randomUUID(), 0, sender, receiver, amount, currency,
             reference, PaymentStatus.CREATED, idempotencyKey, requestHash,
             now, now
+        );
+        payment.attachPayeeCheck(
+            payeeCheck.getId(), payeeCheck.isMismatch()
         );
         payment = paymentRepository.saveAndFlush(payment);
 
@@ -114,8 +126,13 @@ public class PaymentService {
     public Payment createPayment(UUID userId, UUID senderWalletId,
         UUID receiverWalletId, BigDecimal amount, String currency,
         String reference, UUID idempotencyKey) {
+        Wallet receiver = walletService.getWallet(receiverWalletId);
+        var check = payeeCheckService.createCheck(
+            userId, receiverWalletId, receiver.getUser().getName()
+        );
         return createPayment(userId, senderWalletId, receiverWalletId, amount,
-            currency, reference, idempotencyKey.toString()).payment();
+            currency, reference, check.getId(), false,
+            idempotencyKey.toString()).payment();
     }
 
     @Transactional
@@ -159,7 +176,7 @@ public class PaymentService {
 
     private void validateInput(UUID senderWalletId, UUID receiverWalletId,
         BigDecimal amount, String currency, String reference,
-        String idempotencyKey) {
+        UUID payeeCheckId, String idempotencyKey) {
         if (senderWalletId == null || receiverWalletId == null) {
             throw new InvalidPaymentRequestException("Wallet IDs are required");
         }
@@ -193,6 +210,9 @@ public class PaymentService {
             throw new InvalidPaymentRequestException(
                 "Idempotency-Key must contain between 1 and 128 characters"
             );
+        }
+        if (payeeCheckId == null) {
+            throw new InvalidPaymentRequestException("Payee check ID is required");
         }
     }
 

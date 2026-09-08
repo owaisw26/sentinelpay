@@ -835,6 +835,17 @@ public class OutboxPublisherIntegrationTests extends AbstractIntegrationTest {
         );
         paymentRepository.findById(paymentId)
             .ifPresent(paymentRepository::delete);
+        paymentRepository.flush();
+        jdbcTemplate.update(
+            "delete from payee_checks where id not in "
+                + "(select payee_check_id from payments) "
+                + "and receiver_wallet_id = ?",
+            receiver.getId()
+        );
+        jdbcTemplate.update(
+            "delete from payee_registry_entries where receiver_wallet_id = ?",
+            receiver.getId()
+        );
         walletRepository.deleteAllById(
             List.of(sender.getId(), receiver.getId())
         );

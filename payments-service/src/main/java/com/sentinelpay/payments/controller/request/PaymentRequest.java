@@ -31,6 +31,11 @@ public record PaymentRequest(
         regexp = "AUD",
         message = "only AUD payments are supported"
     )
-    String currency
+    String currency,
+
+    @NotNull
+    UUID payeeCheckId,
+
+    boolean acceptNameMismatch
 ) {
 }

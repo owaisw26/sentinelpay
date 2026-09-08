@@ -1,0 +1,141 @@
+package com.sentinelpay.payments.service;
+
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import com.sentinelpay.payments.domain.PayeeCheck;
+import com.sentinelpay.payments.domain.PayeeRegistryEntry;
+import com.sentinelpay.payments.domain.Wallet;
+import com.sentinelpay.payments.exception.InvalidPayeeCheckException;
+import com.sentinelpay.payments.exception.InvalidPaymentRequestException;
+import com.sentinelpay.payments.exception.WalletNotFoundException;
+import com.sentinelpay.payments.repository.PayeeCheckRepository;
+import com.sentinelpay.payments.repository.PayeeRegistryRepository;
+import com.sentinelpay.payments.repository.WalletRepository;
+import com.sentinelpay.payments.security.PayloadHasher;
+import com.sentinelpay.payments.service.PayeeNameMatcher.MatchResult;
+
+import jakarta.transaction.Transactional;
+
+@Service
+public class PayeeCheckService {
+    private final PayeeCheckRepository payeeCheckRepository;
+    private final PayeeRegistryRepository payeeRegistryRepository;
+    private final WalletRepository walletRepository;
+    private final PayeeNameMatcher nameMatcher;
+    private final Duration checkTtl;
+
+    public PayeeCheckService(
+        PayeeCheckRepository payeeCheckRepository,
+        PayeeRegistryRepository payeeRegistryRepository,
+        WalletRepository walletRepository,
+        PayeeNameMatcher nameMatcher,
+        @Value("${sentinelpay.payee-check.ttl:PT15M}") Duration checkTtl
+    ) {
+        this.payeeCheckRepository = payeeCheckRepository;
+        this.payeeRegistryRepository = payeeRegistryRepository;
+        this.walletRepository = walletRepository;
+        this.nameMatcher = nameMatcher;
+        this.checkTtl = checkTtl;
+    }
+
+    @Transactional
+    public PayeeCheck createCheck(UUID requesterUserId, UUID receiverWalletId,
+        String suppliedName) {
+        if (requesterUserId == null || receiverWalletId == null
+            || suppliedName == null || suppliedName.isBlank()
+            || suppliedName.length() > 200) {
+            throw new InvalidPaymentRequestException(
+                "Receiver wallet and a name of at most 200 characters are required"
+            );
+        }
+        String canonicalSuppliedName = nameMatcher.canonicalize(suppliedName);
+        if (canonicalSuppliedName.isBlank()) {
+            throw new InvalidPaymentRequestException(
+                "Supplied name must contain letters or digits"
+            );
+        }
+
+        Wallet receiver = walletRepository.findByIdForUpdate(receiverWalletId)
+            .orElseThrow(() -> new WalletNotFoundException(receiverWalletId));
+        PayeeRegistryEntry registryEntry = payeeRegistryRepository
+            .findByReceiverWalletIdAndActiveTrue(receiverWalletId)
+            .orElseGet(() -> payeeRegistryRepository.saveAndFlush(
+                new PayeeRegistryEntry(
+                    UUID.randomUUID(), receiverWalletId, 1,
+                    receiver.getUser().getName(), true, LocalDateTime.now()
+                )
+            ));
+
+        MatchResult match = nameMatcher.match(
+            suppliedName, registryEntry.getLegalName()
+        );
+        LocalDateTime now = LocalDateTime.now();
+        return payeeCheckRepository.saveAndFlush(new PayeeCheck(
+            UUID.randomUUID(), requesterUserId, receiverWalletId,
+            registryEntry.getRegistryVersion(),
+            PayloadHasher.sha256(canonicalSuppliedName),
+            match.outcome(), match.reasonCode(), now, now.plus(checkTtl)
+        ));
+    }
+
+    @Transactional
+    public PayeeCheck authorizeForPayment(UUID checkId, UUID requesterUserId,
+        UUID receiverWalletId, boolean acceptNameMismatch) {
+        if (checkId == null) {
+            throw InvalidPayeeCheckException.invalid();
+        }
+        PayeeCheck check = payeeCheckRepository.findByIdForUpdate(checkId)
+            .orElseThrow(InvalidPayeeCheckException::invalid);
+        LocalDateTime now = LocalDateTime.now();
+        if (!check.getRequesterUserId().equals(requesterUserId)
+            || !check.getReceiverWalletId().equals(receiverWalletId)
+            || check.isExpiredAt(now)
+            || payeeRegistryRepository
+                .findByReceiverWalletIdAndActiveTrue(receiverWalletId)
+                .map(entry -> entry.getRegistryVersion()
+                    != check.getRegistryVersion())
+                .orElse(true)) {
+            throw InvalidPayeeCheckException.invalid();
+        }
+        if (!check.isMismatch()) {
+            return check;
+        }
+        if (!acceptNameMismatch) {
+            throw InvalidPayeeCheckException.mismatchNotAccepted();
+        }
+        if (check.getConsumedAt() != null) {
+            throw InvalidPayeeCheckException.invalid();
+        }
+        check.consumeMismatch(now);
+        return check;
+    }
+
+    @Transactional
+    public PayeeRegistryEntry replaceRegistryName(UUID receiverWalletId,
+        String legalName) {
+        if (receiverWalletId == null || legalName == null
+            || legalName.isBlank() || legalName.length() > 200
+            || nameMatcher.canonicalize(legalName).isBlank()) {
+            throw new IllegalArgumentException("Registry name is invalid");
+        }
+        walletRepository.findByIdForUpdate(receiverWalletId)
+            .orElseThrow(() -> new WalletNotFoundException(receiverWalletId));
+        PayeeRegistryEntry current = payeeRegistryRepository
+            .findByReceiverWalletIdAndActiveTrue(receiverWalletId)
+            .orElseThrow(() -> new IllegalStateException(
+                "Payee registry entry is missing"
+            ));
+        current.deactivate();
+        payeeRegistryRepository.saveAndFlush(current);
+        return payeeRegistryRepository.save(new PayeeRegistryEntry(
+            UUID.randomUUID(), receiverWalletId,
+            current.getRegistryVersion() + 1, legalName, true,
+            LocalDateTime.now()
+        ));
+    }
+}
