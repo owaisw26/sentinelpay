@@ -46,12 +46,17 @@ public class PayeeCheck {
     @Column(name = "consumed_at")
     private LocalDateTime consumedAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verification_source", nullable = false)
+    private PayeeCheckVerificationSource verificationSource;
+
     protected PayeeCheck() {}
 
     public PayeeCheck(UUID id, UUID requesterUserId, UUID receiverWalletId,
         int registryVersion, String suppliedNameHash,
         PayeeCheckOutcome outcome, PayeeCheckReason reasonCode,
-        LocalDateTime createdAt, LocalDateTime expiresAt) {
+        LocalDateTime createdAt, LocalDateTime expiresAt,
+        PayeeCheckVerificationSource verificationSource) {
         this.id = id;
         this.requesterUserId = requesterUserId;
         this.receiverWalletId = receiverWalletId;
@@ -61,6 +66,7 @@ public class PayeeCheck {
         this.reasonCode = reasonCode;
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
+        this.verificationSource = verificationSource;
     }
 
     public UUID getId() { return id; }
@@ -73,6 +79,9 @@ public class PayeeCheck {
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getExpiresAt() { return expiresAt; }
     public LocalDateTime getConsumedAt() { return consumedAt; }
+    public PayeeCheckVerificationSource getVerificationSource() {
+        return verificationSource;
+    }
 
     public boolean isExpiredAt(LocalDateTime now) {
         return !expiresAt.isAfter(now);

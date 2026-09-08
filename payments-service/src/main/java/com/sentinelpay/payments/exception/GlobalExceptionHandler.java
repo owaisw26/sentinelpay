@@ -2,8 +2,8 @@ package com.sentinelpay.payments.exception;
 
 import java.net.URI;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -74,6 +74,34 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             exception.getErrorCode(),
             exception.getMessage()
         );
+    }
+
+    @ExceptionHandler(PayeeVerificationUnavailableException.class)
+    public ProblemDetail handlePayeeVerificationUnavailable(
+        PayeeVerificationUnavailableException exception
+    ) {
+        return problem(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "PAYEE_VERIFICATION_UNAVAILABLE",
+            exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ProblemDetail> handleRateLimitExceeded(
+        RateLimitExceededException exception
+    ) {
+        ProblemDetail detail = problem(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "RATE_LIMIT_EXCEEDED",
+            "Too many requests"
+        );
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .header(
+                HttpHeaders.RETRY_AFTER,
+                Long.toString(exception.getRetryAfterSeconds())
+            )
+            .body(detail);
     }
 
     @ExceptionHandler(PaymentAlreadyExistsException.class)

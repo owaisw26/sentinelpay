@@ -39,6 +39,7 @@ public class PaymentService {
     private final OutboxEventRepository outboxEventRepository;
     private final ApiIdempotencyRepository idempotencyRepository;
     private final PayeeCheckService payeeCheckService;
+    private final RateLimitService rateLimitService;
     private final ObjectMapper objectMapper;
 
     public PaymentService(PaymentRepository paymentRepository,
@@ -46,12 +47,14 @@ public class PaymentService {
         OutboxEventRepository outboxEventRepository,
         ApiIdempotencyRepository idempotencyRepository,
         PayeeCheckService payeeCheckService,
+        RateLimitService rateLimitService,
         ObjectMapper objectMapper) {
         this.paymentRepository = paymentRepository;
         this.walletService = walletService;
         this.outboxEventRepository = outboxEventRepository;
         this.idempotencyRepository = idempotencyRepository;
         this.payeeCheckService = payeeCheckService;
+        this.rateLimitService = rateLimitService;
         this.objectMapper = objectMapper;
     }
 
@@ -60,6 +63,7 @@ public class PaymentService {
         UUID senderWalletId, UUID receiverWalletId, BigDecimal amount,
         String currency, String reference, UUID payeeCheckId,
         boolean acceptNameMismatch, String idempotencyKey) {
+        rateLimitService.consume(userId, RateLimitOperation.PAYMENT_CREATE);
         validateInput(senderWalletId, receiverWalletId, amount, currency,
             reference, payeeCheckId, idempotencyKey);
 

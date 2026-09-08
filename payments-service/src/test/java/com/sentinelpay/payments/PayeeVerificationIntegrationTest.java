@@ -18,12 +18,16 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import com.jayway.jsonpath.JsonPath;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
+import com.sentinelpay.payments.domain.PayeeCheckOutcome;
+import com.sentinelpay.payments.repository.PayeeCheckRepository;
+import com.sentinelpay.payments.security.PayloadHasher;
 import com.sentinelpay.payments.service.PayeeCheckService;
 import com.sentinelpay.payments.service.UserService;
 import com.sentinelpay.payments.service.WalletService;
@@ -41,6 +45,7 @@ class PayeeVerificationIntegrationTest extends AbstractIntegrationTest {
     @Autowired private WalletService walletService;
     @Autowired private PayeeCheckService payeeCheckService;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PayeeCheckRepository payeeCheckRepository;
     @PersistenceContext private EntityManager entityManager;
 
     @Test
@@ -172,6 +177,32 @@ class PayeeVerificationIntegrationTest extends AbstractIntegrationTest {
             Integer.class, checkId(current)
         );
         assertTrue(newVersion > oldVersion);
+    }
+
+    @Test
+    void successfulChecksOlderThanDegradationWindowAreNotReusable()
+        throws Exception {
+        Fixture fixture = fixture("Age Target");
+        UUID checkId = checkId(createCheck(fixture, "Age Target")
+            .andExpect(status().isCreated()).andReturn());
+        int registryVersion = jdbcTemplate.queryForObject(
+            "select registry_version from payee_checks where id = ?",
+            Integer.class, checkId
+        );
+        entityManager.flush();
+        jdbcTemplate.update(
+            "update payee_checks set created_at = now() - interval '25 hours' "
+                + "where id = ?",
+            checkId
+        );
+        entityManager.clear();
+
+        assertTrue(payeeCheckRepository.findRecentSuccessfulChecks(
+            fixture.senderUser().getUserId(), fixture.receiver().getId(),
+            registryVersion, PayloadHasher.sha256("age target"),
+            PayeeCheckOutcome.MATCH, java.time.LocalDateTime.now().minusHours(24),
+            PageRequest.ofSize(1)
+        ).isEmpty());
     }
 
     private Fixture fixture(String receiverLegalName) throws Exception {
