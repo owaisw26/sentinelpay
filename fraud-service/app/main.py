@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
-app = FastAPI (
-    title="SentinentalPay Fraud Service",
+app = FastAPI(
+    title="SentinelPay Fraud Service",
     version="0.1.0"
 )
 
