@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import timedelta
+from pathlib import Path
 
+from app.anomaly import IsolationForestAnomalyModel
 from app.adapters import SqsRiskConsumer, SqsSnsEventIngestor
 from app.risk import RiskEvaluationPipeline
 from app.store import (
@@ -57,11 +60,29 @@ def build_worker():
 def main() -> None:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
     consumer, store, publisher = build_worker()
-    pipeline = RiskEvaluationPipeline()
+    pipeline = RiskEvaluationPipeline(anomaly_model=_load_anomaly_model())
     while True:
         consumer.poll_once()
         store.finalize_due(pipeline)
         publisher.publish_batch()
+
+
+def _load_anomaly_model() -> IsolationForestAnomalyModel:
+    service_root = Path(__file__).resolve().parent.parent
+    artifact_path = Path(
+        os.getenv(
+            "FRAUD_MODEL_ARTIFACT",
+            str(service_root / "artifacts" / "isolation_forest_v1.json"),
+        )
+    )
+    expected_sha256 = os.getenv("FRAUD_MODEL_SHA256")
+    if expected_sha256 is None:
+        metrics_path = artifact_path.with_suffix(".metrics.json")
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        expected_sha256 = metrics["artifact"]["sha256"]
+    return IsolationForestAnomalyModel.load(
+        artifact_path, expected_sha256=expected_sha256
+    )
 
 
 if __name__ == "__main__":

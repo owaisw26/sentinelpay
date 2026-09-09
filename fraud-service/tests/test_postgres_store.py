@@ -86,6 +86,14 @@ def test_duplicate_delivery_and_finalize_are_database_no_ops(database):
         "SELECT count(*) FROM fraud.risk_features WHERE source_event_id = %s",
         (event.event_id,),
     ) == 1
+    assert _value(
+        database,
+        "SELECT deterministic_score = score "
+        "AND anomaly_score IS NULL "
+        "AND anomaly_contribution = 0 "
+        "FROM fraud.risk_decisions WHERE source_event_id = %s",
+        (event.event_id,),
+    ) is True
 
 
 @pytest.mark.postgres

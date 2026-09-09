@@ -367,11 +367,12 @@ class PostgresRiskStore:
             INSERT INTO fraud.risk_decisions(
                 decision_id, payment_id, source_event_id,
                 source_aggregate_sequence, feature_version, ruleset_version,
-                model_version, score, action, reason_codes, decision,
+                model_version, deterministic_score, anomaly_score,
+                anomaly_contribution, score, action, reason_codes, decision,
                 decided_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                clock_timestamp()
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, clock_timestamp()
             )
             ON CONFLICT (source_event_id) DO NOTHING
             """,
@@ -383,6 +384,9 @@ class PostgresRiskStore:
                 payload.feature_version,
                 payload.ruleset_version,
                 payload.model_version,
+                result.audit_record.deterministic_score,
+                result.audit_record.anomaly_score,
+                result.audit_record.anomaly_contribution,
                 payload.score,
                 payload.action.value,
                 list(payload.reason_codes),
@@ -465,11 +469,12 @@ class PostgresDecisionOutboxPublisher:
 
 
 def apply_migrations(connection: Any) -> None:
-    migration = (
-        Path(__file__).resolve().parent.parent
-        / "migrations"
-        / "V1__fraud_streaming.sql"
+    migration_directory = Path(__file__).resolve().parent.parent / "migrations"
+    migrations = sorted(
+        migration_directory.glob("V*.sql"),
+        key=lambda path: int(path.name.split("__", 1)[0][1:]),
     )
-    with connection.transaction():
-        with connection.cursor() as cursor:
-            cursor.execute(migration.read_text())
+    for migration in migrations:
+        with connection.transaction():
+            with connection.cursor() as cursor:
+                cursor.execute(migration.read_text())

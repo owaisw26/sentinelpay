@@ -1,0 +1,34 @@
+{
+  "artifact": {
+    "path": "isolation_forest_v1.json",
+    "sha256": "73563044d086d3709bd48538d5998314c4a11b6ced18ecd15b8298b890790042"
+  },
+  "featureVersion": "anomaly-features-v1",
+  "modelVersion": "isolation-forest-v1",
+  "runtime": {
+    "fitThreads": 1,
+    "numpy": "2.5.3",
+    "scikitLearn": "1.9.0"
+  },
+  "seed": 140014,
+  "training": {
+    "fraudRows": 405,
+    "labelsUsedForFit": false,
+    "rows": 4800
+  },
+  "validation": {
+    "averagePrecision": 0.9292995913825661,
+    "falseNegatives": 18,
+    "falsePositives": 11,
+    "fraudRows": 114,
+    "maximumServingScoreDelta": 1.6653345369377348e-16,
+    "precision": 0.897196261682243,
+    "recall": 0.8421052631578947,
+    "rocAuc": 0.9950781932206081,
+    "rows": 1440,
+    "severeThreshold": 0.7018352254768957,
+    "targetRecall": 0.8,
+    "threshold": 0.6302272257674992,
+    "truePositives": 96
+  }
+}

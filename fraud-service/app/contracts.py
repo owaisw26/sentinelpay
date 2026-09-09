@@ -100,7 +100,7 @@ class RiskDecisionV1(StrictContract):
     source_aggregate_sequence: int = Field(ge=1)
     feature_version: str
     ruleset_version: str
-    model_version: Literal["none"] = "none"
+    model_version: str = Field(min_length=1, max_length=100)
     score: int = Field(ge=0)
     action: RiskAction
     reason_codes: tuple[str, ...]
@@ -130,7 +130,11 @@ class RiskEvaluationAuditV1(StrictContract):
     decision_id: UUID
     feature_version: str
     ruleset_version: str
+    model_version: str
     features: RiskFeatures
+    deterministic_score: int = Field(ge=0)
+    anomaly_score: float | None
+    anomaly_contribution: int = Field(ge=0, le=30)
     score: int = Field(ge=0)
     action: RiskAction
     reason_codes: tuple[str, ...]

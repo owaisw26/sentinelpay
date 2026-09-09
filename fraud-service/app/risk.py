@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID, uuid5
 
+from app.anomaly import (
+    SEVERE_ANOMALY_POINTS,
+    AnomalyAssessment,
+    IsolationForestAnomalyModel,
+)
 from app.contracts import (
     PaymentScreeningEnvelopeV1,
     RiskAction,
@@ -120,6 +125,7 @@ class RiskEvaluationPipeline:
         scorer: DeterministicRuleScorer | None = None,
         classifier: DecisionClassifier | None = None,
         ruleset: RiskRuleset = DEFAULT_RULESET_V1,
+        anomaly_model: IsolationForestAnomalyModel | None = None,
     ) -> None:
         self._enricher = enricher or FeatureEnricher()
         self._scorer = scorer or DeterministicRuleScorer(ruleset)
@@ -127,6 +133,7 @@ class RiskEvaluationPipeline:
         if self._scorer.ruleset != self._classifier.ruleset:
             raise ValueError("scorer and classifier must use the same ruleset")
         self._ruleset = self._scorer.ruleset
+        self._anomaly_model = anomaly_model
 
     def evaluate(
         self,
@@ -134,11 +141,20 @@ class RiskEvaluationPipeline:
         history: RiskHistorySnapshot,
     ) -> EvaluationResult:
         features = self._enricher.enrich(event, history)
-        score, reasons = self._scorer.score(features)
+        deterministic_score, deterministic_reasons = self._scorer.score(
+            features
+        )
+        assessment = self._assess_anomaly(features)
+        score = deterministic_score + assessment.contribution
+        reasons = deterministic_reasons + assessment.reason_codes
         action = self._classifier.decide(score)
+        model_version = (
+            self._anomaly_model.version if self._anomaly_model else "none"
+        )
         decision_id = uuid5(
             DECISION_NAMESPACE,
-            f"{event.event_id}:{FEATURE_VERSION}:{self._ruleset.version}",
+            f"{event.event_id}:{FEATURE_VERSION}:{self._ruleset.version}:"
+            f"{model_version}",
         )
         decision = RiskDecisionV1(
             decision_id=decision_id,
@@ -147,6 +163,7 @@ class RiskEvaluationPipeline:
             source_aggregate_sequence=event.aggregate_sequence,
             feature_version=FEATURE_VERSION,
             ruleset_version=self._ruleset.version,
+            model_version=model_version,
             score=score,
             action=action,
             reason_codes=reasons,
@@ -168,10 +185,26 @@ class RiskEvaluationPipeline:
             decision_id=decision_id,
             feature_version=FEATURE_VERSION,
             ruleset_version=self._ruleset.version,
+            model_version=model_version,
             features=features,
+            deterministic_score=deterministic_score,
+            anomaly_score=(
+                assessment.anomaly_score if self._anomaly_model else None
+            ),
+            anomaly_contribution=assessment.contribution,
             score=score,
             action=action,
             reason_codes=reasons,
             evaluated_at=event.occurred_at,
         )
         return EvaluationResult(decision_event, audit)
+
+    def _assess_anomaly(self, features: RiskFeatures) -> AnomalyAssessment:
+        if self._anomaly_model is None:
+            return AnomalyAssessment(0.0, 0, ())
+        assessment = self._anomaly_model.assess(features)
+        if not 0 <= assessment.contribution <= SEVERE_ANOMALY_POINTS:
+            raise ValueError("anomaly contribution exceeds its safety bound")
+        if assessment.contribution > 0 and not assessment.reason_codes:
+            raise ValueError("anomaly contribution requires an explanation")
+        return assessment
