@@ -3,4 +3,5 @@ pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
     "localstack: acceptance tests requiring a running LocalStack instance",
+    "postgres: integration tests requiring Docker",
 ]

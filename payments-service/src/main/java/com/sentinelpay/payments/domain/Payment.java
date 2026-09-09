@@ -23,7 +23,17 @@ import jakarta.persistence.Version;
 @Table(name = "payments")
 public class Payment {
     private static final Map<PaymentStatus, List<PaymentStatus>> validPaymentStates = Map.of(
-        PaymentStatus.CREATED, List.of(PaymentStatus.SCREENING), PaymentStatus.SCREENING, List.of(PaymentStatus.APPROVED, PaymentStatus.BLOCKED), PaymentStatus.APPROVED, List.of(PaymentStatus.PROCESSING), PaymentStatus.PROCESSING, List.of(PaymentStatus.SETTLED, PaymentStatus.FAILED)
+        PaymentStatus.CREATED, List.of(PaymentStatus.SCREENING),
+        PaymentStatus.SCREENING, List.of(
+            PaymentStatus.APPROVED, PaymentStatus.HELD, PaymentStatus.BLOCKED
+        ),
+        PaymentStatus.HELD, List.of(
+            PaymentStatus.APPROVED, PaymentStatus.BLOCKED
+        ),
+        PaymentStatus.APPROVED, List.of(PaymentStatus.PROCESSING),
+        PaymentStatus.PROCESSING, List.of(
+            PaymentStatus.SETTLED, PaymentStatus.FAILED
+        )
     );
 
     public Payment() {}
@@ -87,6 +97,15 @@ public class Payment {
     @Column(name = "provider_payment_id", unique = true)
     private String providerPaymentId;
 
+    @Column(name = "screening_sequence")
+    private Long screeningSequence;
+
+    @Column(name = "risk_decision_id")
+    private UUID riskDecisionId;
+
+    @Column(name = "risk_decision_action")
+    private String riskDecisionAction;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -145,6 +164,18 @@ public class Payment {
         return providerPaymentId;
     }
 
+    public Long getScreeningSequence() {
+        return screeningSequence;
+    }
+
+    public UUID getRiskDecisionId() {
+        return riskDecisionId;
+    }
+
+    public String getRiskDecisionAction() {
+        return riskDecisionAction;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -156,12 +187,37 @@ public class Payment {
     public void transitionTo(PaymentStatus newStatus) {
         List<PaymentStatus> possibleStates = validPaymentStates.get(this.status);
 
-        if (possibleStates.contains(newStatus)) {
+        if (possibleStates != null && possibleStates.contains(newStatus)) {
             this.status = newStatus;
             this.updatedAt = LocalDateTime.now();
         } else {
             throw new InvalidPaymentTransition(this.status.toString(), newStatus.toString());
         }
+    }
+
+    public void beginScreening(long aggregateSequence) {
+        if (aggregateSequence < 1) {
+            throw new IllegalArgumentException("Screening sequence must be positive");
+        }
+        if (screeningSequence != null) {
+            throw new IllegalStateException("Payment screening already started");
+        }
+        transitionTo(PaymentStatus.SCREENING);
+        screeningSequence = aggregateSequence;
+    }
+
+    public void recordRiskDecision(UUID decisionId, String action) {
+        if (riskDecisionId != null) {
+            if (!riskDecisionId.equals(decisionId) ||
+                !riskDecisionAction.equals(action)) {
+                throw new IllegalStateException(
+                    "Payment already has a different risk decision"
+                );
+            }
+            return;
+        }
+        riskDecisionId = decisionId;
+        riskDecisionAction = action;
     }
 
     public void assignProviderPaymentId(String providerPaymentId) {

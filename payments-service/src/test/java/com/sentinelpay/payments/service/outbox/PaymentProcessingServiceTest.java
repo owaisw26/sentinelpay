@@ -3,6 +3,7 @@ package com.sentinelpay.payments.service.outbox;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -112,6 +113,24 @@ class PaymentProcessingServiceTest {
             ProviderAttemptInProgressException.class,
             () -> paymentProcessingService.claimProcessing(eventId, paymentId)
         );
+    }
+
+    @Test
+    void screeningPaymentCannotBeAdvancedByProviderMessage() {
+        UUID eventId = UUID.randomUUID();
+        UUID paymentId = UUID.randomUUID();
+        when(paymentRepository.findByIdForUpdate(paymentId))
+            .thenReturn(Optional.of(payment));
+        when(payment.getStatus()).thenReturn(PaymentStatus.SCREENING);
+        when(payment.getScreeningSequence()).thenReturn(1L);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> paymentProcessingService.claimProcessing(eventId, paymentId)
+        );
+
+        verify(ledgerService, never()).reservePayment(payment);
+        verifyNoInteractions(providerAttemptRepository);
     }
 
     private void prepareCompletion(UUID paymentId, UUID leaseToken) {

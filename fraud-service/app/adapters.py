@@ -190,7 +190,7 @@ class SqsRiskConsumer:
         self,
         sqs_client: Any,
         queue_url: str,
-        handler: RiskMessageHandler,
+        handler: Any,
         *,
         wait_time_seconds: int = 10,
         visibility_timeout_seconds: int = 30,

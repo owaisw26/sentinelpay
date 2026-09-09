@@ -21,7 +21,8 @@ public class PaymentEventProcessor {
     }
 
     public void process(OutboxMessage message) {
-        if (!"PAYMENT_CREATED".equals(message.eventType()) ||
+        if (!("PAYMENT_CREATED".equals(message.eventType()) ||
+              "PAYMENT_APPROVED".equals(message.eventType())) ||
             paymentProcessingService.isProcessed(message.eventId())) {
             return;
         }

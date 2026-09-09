@@ -10,6 +10,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/01-fraud-role.sql:/docker-entrypoint-initdb.d/01-fraud-role.sql:ro
+      - ./fraud-service/migrations/V1__fraud_streaming.sql:/docker-entrypoint-initdb.d/02-fraud-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sentinelpay -d sentinelpay"]
       interval: 5s
@@ -25,6 +27,49 @@ services:
       - "4566:4566"
     volumes:
       - ./infra/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+    healthcheck:
+      test: ["CMD", "awslocal", "sqs", "get-queue-url", "--queue-name", "fraud-events", "--region", "ap-southeast-2"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  fraud-db-migrate:
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGDATABASE: sentinelpay
+      PGUSER: sentinelpay
+      PGPASSWORD: sentinelpay_dev
+    command:
+      - sh
+      - -ec
+      - psql -v ON_ERROR_STOP=1 -f /migrations/01-fraud-role.sql && psql -v ON_ERROR_STOP=1 -f /migrations/V1__fraud_streaming.sql
+    volumes:
+      - ./infra/postgres/01-fraud-role.sql:/migrations/01-fraud-role.sql:ro
+      - ./fraud-service/migrations/V1__fraud_streaming.sql:/migrations/V1__fraud_streaming.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  fraud-service:
+    build: ./fraud-service
+    environment:
+      AWS_REGION: ap-southeast-2
+      AWS_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      FRAUD_EVENTS_QUEUE_URL: http://localstack:4566/000000000000/fraud-events
+      RISK_DECISIONS_TOPIC_ARN: arn:aws:sns:ap-southeast-2:000000000000:risk-decisions
+      FRAUD_DB_DSN: postgresql://fraud_runtime:fraud_local_only@postgres:5432/sentinelpay
+      FRAUD_ALLOWED_LATENESS_SECONDS: 30
+      FRAUD_MAXIMUM_FUTURE_SKEW_SECONDS: 30
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fraud-db-migrate:
+        condition: service_completed_successfully
+      localstack:
+        condition: service_healthy
 
 
 volumes:

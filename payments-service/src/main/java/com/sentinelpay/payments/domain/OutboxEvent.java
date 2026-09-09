@@ -1,6 +1,8 @@
 package com.sentinelpay.payments.domain;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import org.hibernate.annotations.JdbcTypeCode;
@@ -33,6 +35,18 @@ public class OutboxEvent {
     @Column(name = "correlation_id", nullable = false)
     private UUID correlationId;
 
+    @Column(name = "schema_version", nullable = false)
+    private int schemaVersion;
+
+    @Column(name = "aggregate_sequence", nullable = false)
+    private long aggregateSequence;
+
+    @Column(name = "occurred_at", nullable = false)
+    private OffsetDateTime occurredAt;
+
+    @Column(name = "causation_id")
+    private UUID causationId;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -63,12 +77,27 @@ public class OutboxEvent {
         JsonNode payload,
         UUID correlationId
     ) {
+        this(aggregateId, eventType, 1, payload, correlationId, null);
+    }
+
+    public OutboxEvent(
+        UUID aggregateId,
+        String eventType,
+        long aggregateSequence,
+        JsonNode payload,
+        UUID correlationId,
+        UUID causationId
+    ) {
         this.id = UUID.randomUUID();
         this.aggregateId = aggregateId;
         this.eventType = eventType;
         this.payload = payload;
         this.correlationId = correlationId;
         this.createdAt = LocalDateTime.now();
+        this.schemaVersion = 1;
+        this.aggregateSequence = aggregateSequence;
+        this.occurredAt = OffsetDateTime.now(ZoneOffset.UTC);
+        this.causationId = causationId;
         this.publishedAt = null;
         this.attemptCount = 0;
         this.nextAttemptAt = createdAt;
@@ -92,6 +121,22 @@ public class OutboxEvent {
 
     public UUID getCorrelationId() {
         return correlationId;
+    }
+
+    public int getSchemaVersion() {
+        return schemaVersion;
+    }
+
+    public long getAggregateSequence() {
+        return aggregateSequence;
+    }
+
+    public OffsetDateTime getOccurredAt() {
+        return occurredAt;
+    }
+
+    public UUID getCausationId() {
+        return causationId;
     }
 
     public LocalDateTime getCreatedAt() {

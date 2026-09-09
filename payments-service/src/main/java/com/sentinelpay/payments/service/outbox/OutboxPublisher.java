@@ -19,6 +19,7 @@ public class OutboxPublisher {
     private final SqsClient sqsClient;
     private final ObjectMapper objectMapper;
     private final String queueUrl;
+    private final String fraudQueueUrl;
     private final int batchSize;
     private final long leaseSeconds;
     private final long retryBaseMillis;
@@ -29,6 +30,8 @@ public class OutboxPublisher {
         SqsClient sqsClient,
         ObjectMapper objectMapper,
         @Value("${sentinelpay.sqs.payment-events-url}") String queueUrl,
+        @Value("${sentinelpay.sqs.fraud-events-url:${sentinelpay.sqs.payment-events-url}}")
+            String fraudQueueUrl,
         @Value("${sentinelpay.outbox.batch-size:50}") int batchSize,
         @Value("${sentinelpay.outbox.lease-seconds:30}") long leaseSeconds,
         @Value("${sentinelpay.outbox.retry-base-ms:1000}") long retryBaseMillis,
@@ -38,6 +41,7 @@ public class OutboxPublisher {
         this.sqsClient = sqsClient;
         this.objectMapper = objectMapper;
         this.queueUrl = queueUrl;
+        this.fraudQueueUrl = fraudQueueUrl;
         this.batchSize = batchSize;
         this.leaseSeconds = leaseSeconds;
         this.retryBaseMillis = retryBaseMillis;
@@ -59,12 +63,22 @@ public class OutboxPublisher {
 
         for (OutboxEvent event: events) {
             try {
-                OutboxMessage message = new OutboxMessage(event.getId(), event.getAggregateId(), event.getEventType(), event.getCorrelationId(), event.getCreatedAt(), event.getPayload());
+                OutboxMessage message = new OutboxMessage(
+                    event.getId(),
+                    event.getEventType(),
+                    event.getSchemaVersion(),
+                    event.getAggregateId(),
+                    event.getAggregateSequence(),
+                    event.getOccurredAt(),
+                    event.getCorrelationId(),
+                    event.getCausationId(),
+                    event.getPayload()
+                );
 
                 String messageBody = objectMapper.writeValueAsString(message);
 
                 SendMessageRequest request = SendMessageRequest.builder()
-                    .queueUrl(queueUrl)
+                    .queueUrl(destinationFor(event))
                     .messageBody(messageBody)
                     .build();
 
@@ -90,6 +104,12 @@ public class OutboxPublisher {
         if (firstFailure != null) {
             throw firstFailure;
         }
+    }
+
+    private String destinationFor(OutboxEvent event) {
+        return "PAYMENT_SCREENING_REQUESTED".equals(event.getEventType())
+            ? fraudQueueUrl
+            : queueUrl;
     }
 
     private long retryDelayMillis(int attemptCount) {

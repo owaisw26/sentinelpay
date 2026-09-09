@@ -7,5 +7,6 @@ public enum PaymentStatus {
     PROCESSING,
     SETTLED,
     FAILED,
+    HELD,
     BLOCKED
 }

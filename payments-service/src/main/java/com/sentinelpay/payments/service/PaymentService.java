@@ -9,6 +9,7 @@ import java.util.HexFormat;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.sentinelpay.payments.controller.response.PaymentResponse;
@@ -25,6 +26,7 @@ import com.sentinelpay.payments.repository.ApiIdempotencyRepository.StoredRespon
 import com.sentinelpay.payments.repository.OutboxEventRepository;
 import com.sentinelpay.payments.repository.PaymentRepository;
 import com.sentinelpay.payments.service.outbox.PaymentCreatedEvent;
+import com.sentinelpay.payments.service.outbox.PaymentScreeningRequestedEvent;
 
 import jakarta.transaction.Transactional;
 import tools.jackson.databind.JsonNode;
@@ -40,19 +42,22 @@ public class PaymentService {
     private final ApiIdempotencyRepository idempotencyRepository;
     private final PayeeCheckService payeeCheckService;
     private final ObjectMapper objectMapper;
+    private final boolean riskEnabled;
 
     public PaymentService(PaymentRepository paymentRepository,
         WalletService walletService,
         OutboxEventRepository outboxEventRepository,
         ApiIdempotencyRepository idempotencyRepository,
         PayeeCheckService payeeCheckService,
-        ObjectMapper objectMapper) {
+        ObjectMapper objectMapper,
+        @Value("${sentinelpay.risk.enabled:true}") boolean riskEnabled) {
         this.paymentRepository = paymentRepository;
         this.walletService = walletService;
         this.outboxEventRepository = outboxEventRepository;
         this.idempotencyRepository = idempotencyRepository;
         this.payeeCheckService = payeeCheckService;
         this.objectMapper = objectMapper;
+        this.riskEnabled = riskEnabled;
     }
 
     @Transactional
@@ -104,13 +109,30 @@ public class PaymentService {
         );
         payment = paymentRepository.saveAndFlush(payment);
 
-        PaymentCreatedEvent payloadObject = new PaymentCreatedEvent(
-            payment.getId(), senderWalletId, receiverWalletId, amount, currency
-        );
-        JsonNode payload = objectMapper.valueToTree(payloadObject);
-        outboxEventRepository.save(new OutboxEvent(
-            payment.getId(), "PAYMENT_CREATED", payload, UUID.randomUUID()
-        ));
+        UUID correlationId = UUID.randomUUID();
+        if (riskEnabled) {
+            payment.beginScreening(1);
+            PaymentScreeningRequestedEvent payloadObject =
+                new PaymentScreeningRequestedEvent(
+                    payment.getId(), userId, receiverWalletId, amount, currency,
+                    deviceTokenFor(userId), payeeCheck.getOutcome(),
+                    payment.isAcceptedNameMismatch()
+                );
+            JsonNode payload = objectMapper.valueToTree(payloadObject);
+            outboxEventRepository.save(new OutboxEvent(
+                payment.getId(), "PAYMENT_SCREENING_REQUESTED", 1, payload,
+                correlationId, null
+            ));
+        } else {
+            PaymentCreatedEvent payloadObject = new PaymentCreatedEvent(
+                payment.getId(), senderWalletId, receiverWalletId, amount,
+                currency
+            );
+            JsonNode payload = objectMapper.valueToTree(payloadObject);
+            outboxEventRepository.save(new OutboxEvent(
+                payment.getId(), "PAYMENT_CREATED", payload, correlationId
+            ));
+        }
 
         PaymentResponse response = PaymentResponse.from(payment);
         idempotencyRepository.complete(
@@ -233,5 +255,9 @@ public class PaymentService {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
+    }
+
+    private String deviceTokenFor(UUID userId) {
+        return "customer_" + userId.toString().replace("-", "");
     }
 }

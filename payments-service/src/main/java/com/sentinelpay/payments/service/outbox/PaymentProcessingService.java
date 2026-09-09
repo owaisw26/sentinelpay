@@ -65,16 +65,19 @@ public class PaymentProcessingService {
             return Optional.empty();
         }
 
-        advanceToApproved(payment);
-        ledgerService.reservePayment(payment);
-
-        if (payment.getStatus() == PaymentStatus.APPROVED) {
-            payment.transitionTo(PaymentStatus.PROCESSING);
+        if (payment.getScreeningSequence() == null) {
+            // Compatibility path used only when risk screening is explicitly
+            // disabled (for legacy tests/local migration work).
+            advanceToApproved(payment);
+            ledgerService.reservePayment(payment);
+            if (payment.getStatus() == PaymentStatus.APPROVED) {
+                payment.transitionTo(PaymentStatus.PROCESSING);
+            }
         }
 
         if (payment.getStatus() != PaymentStatus.PROCESSING) {
             throw new IllegalStateException(
-                "Payment is not eligible for provider processing"
+                "Payment has not completed risk approval"
             );
         }
 
