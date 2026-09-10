@@ -18,6 +18,12 @@ from app.contracts import (
     RiskFeatures,
 )
 from app.history import RiskHistorySnapshot
+from app.rules import (
+    EMPTY_DYNAMIC_RULESET,
+    DynamicRuleEvaluator,
+    DynamicRuleSet,
+    more_severe,
+)
 
 
 FEATURE_VERSION = "payment-features-v1"
@@ -126,6 +132,8 @@ class RiskEvaluationPipeline:
         classifier: DecisionClassifier | None = None,
         ruleset: RiskRuleset = DEFAULT_RULESET_V1,
         anomaly_model: IsolationForestAnomalyModel | None = None,
+        dynamic_ruleset: DynamicRuleSet = EMPTY_DYNAMIC_RULESET,
+        dynamic_evaluator: DynamicRuleEvaluator | None = None,
     ) -> None:
         self._enricher = enricher or FeatureEnricher()
         self._scorer = scorer or DeterministicRuleScorer(ruleset)
@@ -134,6 +142,8 @@ class RiskEvaluationPipeline:
             raise ValueError("scorer and classifier must use the same ruleset")
         self._ruleset = self._scorer.ruleset
         self._anomaly_model = anomaly_model
+        self._dynamic_ruleset = dynamic_ruleset
+        self._dynamic_evaluator = dynamic_evaluator or DynamicRuleEvaluator()
 
     def evaluate(
         self,
@@ -148,12 +158,23 @@ class RiskEvaluationPipeline:
         score = deterministic_score + assessment.contribution
         reasons = deterministic_reasons + assessment.reason_codes
         action = self._classifier.decide(score)
+        dynamic_match = self._dynamic_evaluator.evaluate(
+            features,
+            self._dynamic_ruleset,
+            evaluated_at=event.occurred_at,
+        )
+        if dynamic_match.action is not None:
+            action = more_severe(action, dynamic_match.action)
+        reasons = reasons + dynamic_match.reason_codes
         model_version = (
             self._anomaly_model.version if self._anomaly_model else "none"
         )
+        ruleset_version = (
+            f"{self._ruleset.version}+dynamic-{self._dynamic_ruleset.version}"
+        )
         decision_id = uuid5(
             DECISION_NAMESPACE,
-            f"{event.event_id}:{FEATURE_VERSION}:{self._ruleset.version}:"
+            f"{event.event_id}:{FEATURE_VERSION}:{ruleset_version}:"
             f"{model_version}",
         )
         decision = RiskDecisionV1(
@@ -162,11 +183,12 @@ class RiskEvaluationPipeline:
             source_event_id=event.event_id,
             source_aggregate_sequence=event.aggregate_sequence,
             feature_version=FEATURE_VERSION,
-            ruleset_version=self._ruleset.version,
+            ruleset_version=ruleset_version,
             model_version=model_version,
             score=score,
             action=action,
             reason_codes=reasons,
+            matched_rule_ids=dynamic_match.rule_ids,
             evaluated_at=event.occurred_at,
         )
         decision_event = RiskDecisionEnvelopeV1(
@@ -184,7 +206,7 @@ class RiskEvaluationPipeline:
             source_event_id=event.event_id,
             decision_id=decision_id,
             feature_version=FEATURE_VERSION,
-            ruleset_version=self._ruleset.version,
+            ruleset_version=ruleset_version,
             model_version=model_version,
             features=features,
             deterministic_score=deterministic_score,
@@ -195,6 +217,7 @@ class RiskEvaluationPipeline:
             score=score,
             action=action,
             reason_codes=reasons,
+            matched_rule_ids=dynamic_match.rule_ids,
             evaluated_at=event.occurred_at,
         )
         return EvaluationResult(decision_event, audit)

@@ -56,7 +56,7 @@ class RiskDecisionMessageParserTest {
             new RiskDecisionPayload(
                 decisionId, paymentId, sourceEventId, 1,
                 "payment-features-v1", "deterministic-rules-v1", "none",
-                0, RiskAction.APPROVE, List.of(), now
+                0, RiskAction.APPROVE, List.of(), List.of(), now
             )
         );
     }

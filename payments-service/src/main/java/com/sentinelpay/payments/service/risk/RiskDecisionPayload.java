@@ -15,5 +15,6 @@ public record RiskDecisionPayload(
     int score,
     RiskAction action,
     List<String> reasonCodes,
+    List<UUID> matchedRuleIds,
     OffsetDateTime evaluatedAt
 ) {}

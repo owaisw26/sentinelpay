@@ -172,7 +172,8 @@ class RiskDecisionIntegrationTest extends AbstractIntegrationTest {
             new RiskDecisionPayload(
                 decisionId, payment.getId(), screening.getId(),
                 sourceSequence, "payment-features-v1",
-                "deterministic-rules-v1", "none", 0, action, reasons, now
+                "deterministic-rules-v1", "none", 0, action, reasons,
+                List.of(), now
             )
         );
     }

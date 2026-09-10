@@ -202,6 +202,39 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         );
     }
 
+    @ExceptionHandler(FraudRuleNotFoundException.class)
+    public ProblemDetail handleFraudRuleNotFound(
+        FraudRuleNotFoundException exception
+    ) {
+        return problem(
+            HttpStatus.NOT_FOUND,
+            "RULE_RESOURCE_NOT_FOUND",
+            exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(FraudRuleConflictException.class)
+    public ProblemDetail handleFraudRuleConflict(
+        FraudRuleConflictException exception
+    ) {
+        return problem(
+            HttpStatus.CONFLICT,
+            "RULE_VERSION_CONFLICT",
+            exception.getMessage()
+        );
+    }
+
+    @ExceptionHandler(FraudRuleServiceUnavailableException.class)
+    public ProblemDetail handleFraudRuleServiceUnavailable(
+        FraudRuleServiceUnavailableException exception
+    ) {
+        return problem(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "FRAUD_RULE_SERVICE_UNAVAILABLE",
+            "Fraud rule service is unavailable"
+        );
+    }
+
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(
         MethodArgumentNotValidException exception,

@@ -136,6 +136,17 @@ public class WalletSecurityIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void customerCannotAccessRuleProposalEndpoints() throws Exception {
+        User customer = userService.createUser("Rule Proposal Customer", "CUSTOMER");
+        String token = issueToken(customer.getUserId());
+
+        mockMvc.perform(
+            post("/analyst/risk/rule-proposals")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+        ).andExpect(status().isForbidden());
+    }
+
+    @Test
     void analystCanReadReconciliationDiscrepancies() throws Exception {
         User analyst = userService.createUser("Reconciliation Analyst", "ANALYST");
         String token = issueToken(analyst.getUserId());

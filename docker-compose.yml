@@ -12,6 +12,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/01-fraud-role.sql:/docker-entrypoint-initdb.d/01-fraud-role.sql:ro
       - ./fraud-service/migrations/V1__fraud_streaming.sql:/docker-entrypoint-initdb.d/02-fraud-schema.sql:ro
+      - ./fraud-service/migrations/V2__add_anomaly_decision_audit.sql:/docker-entrypoint-initdb.d/03-fraud-anomaly.sql:ro
+      - ./fraud-service/migrations/V3__human_approved_rule_proposals.sql:/docker-entrypoint-initdb.d/04-fraud-rules.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sentinelpay -d sentinelpay"]
       interval: 5s
@@ -43,10 +45,12 @@ services:
     command:
       - sh
       - -ec
-      - psql -v ON_ERROR_STOP=1 -f /migrations/01-fraud-role.sql && psql -v ON_ERROR_STOP=1 -f /migrations/V1__fraud_streaming.sql
+      - psql -v ON_ERROR_STOP=1 -f /migrations/01-fraud-role.sql && psql -v ON_ERROR_STOP=1 -f /migrations/V1__fraud_streaming.sql && psql -v ON_ERROR_STOP=1 -f /migrations/V2__add_anomaly_decision_audit.sql && psql -v ON_ERROR_STOP=1 -f /migrations/V3__human_approved_rule_proposals.sql
     volumes:
       - ./infra/postgres/01-fraud-role.sql:/migrations/01-fraud-role.sql:ro
       - ./fraud-service/migrations/V1__fraud_streaming.sql:/migrations/V1__fraud_streaming.sql:ro
+      - ./fraud-service/migrations/V2__add_anomaly_decision_audit.sql:/migrations/V2__add_anomaly_decision_audit.sql:ro
+      - ./fraud-service/migrations/V3__human_approved_rule_proposals.sql:/migrations/V3__human_approved_rule_proposals.sql:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,6 +74,25 @@ services:
         condition: service_completed_successfully
       localstack:
         condition: service_healthy
+
+  fraud-api:
+    build: ./fraud-service
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      FRAUD_DB_DSN: postgresql://fraud_runtime:fraud_local_only@postgres:5432/sentinelpay
+      FRAUD_INTERNAL_TOKEN: ${FRAUD_INTERNAL_TOKEN:-sentinelpay-local-internal-only}
+      RULE_PROPOSAL_PROVIDER: ${RULE_PROPOSAL_PROVIDER:-stub}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_RULE_MODEL: ${OPENAI_RULE_MODEL:-gpt-5.4-mini-2026-03-17}
+      OPENAI_TIMEOUT_SECONDS: 20
+      OPENAI_MAX_OUTPUT_TOKENS: 8000
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fraud-db-migrate:
+        condition: service_completed_successfully
 
 
 volumes:

@@ -104,6 +104,7 @@ class RiskDecisionV1(StrictContract):
     score: int = Field(ge=0)
     action: RiskAction
     reason_codes: tuple[str, ...]
+    matched_rule_ids: tuple[UUID, ...] = ()
     evaluated_at: AwareDatetime
 
     @model_validator(mode="after")
@@ -138,4 +139,5 @@ class RiskEvaluationAuditV1(StrictContract):
     score: int = Field(ge=0)
     action: RiskAction
     reason_codes: tuple[str, ...]
+    matched_rule_ids: tuple[UUID, ...] = ()
     evaluated_at: AwareDatetime

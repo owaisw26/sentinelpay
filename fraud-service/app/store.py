@@ -368,11 +368,11 @@ class PostgresRiskStore:
                 decision_id, payment_id, source_event_id,
                 source_aggregate_sequence, feature_version, ruleset_version,
                 model_version, deterministic_score, anomaly_score,
-                anomaly_contribution, score, action, reason_codes, decision,
-                decided_at
+                anomaly_contribution, score, action, reason_codes,
+                matched_rule_ids, decision, decided_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, clock_timestamp()
+                %s, %s, %s, clock_timestamp()
             )
             ON CONFLICT (source_event_id) DO NOTHING
             """,
@@ -390,6 +390,7 @@ class PostgresRiskStore:
                 payload.score,
                 payload.action.value,
                 list(payload.reason_codes),
+                list(payload.matched_rule_ids),
                 Jsonb(decision_document),
             ),
         )

@@ -9,6 +9,7 @@ from pathlib import Path
 from app.anomaly import IsolationForestAnomalyModel
 from app.adapters import SqsRiskConsumer, SqsSnsEventIngestor
 from app.risk import RiskEvaluationPipeline
+from app.proposal_store import PostgresRuleProposalStore
 from app.store import (
     DurableRiskMessageHandler,
     PostgresDecisionOutboxPublisher,
@@ -54,15 +55,19 @@ def build_worker():
         boto3.client("sns", **client_options),
         topic_arn,
     )
-    return consumer, store, publisher
+    return consumer, store, publisher, PostgresRuleProposalStore(connection)
 
 
 def main() -> None:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-    consumer, store, publisher = build_worker()
-    pipeline = RiskEvaluationPipeline(anomaly_model=_load_anomaly_model())
+    consumer, store, publisher, rule_store = build_worker()
+    anomaly_model = _load_anomaly_model()
     while True:
         consumer.poll_once()
+        pipeline = RiskEvaluationPipeline(
+            anomaly_model=anomaly_model,
+            dynamic_ruleset=rule_store.active_ruleset().dynamic_ruleset(),
+        )
         store.finalize_due(pipeline)
         publisher.publish_batch()
 
