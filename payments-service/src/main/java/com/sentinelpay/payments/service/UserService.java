@@ -27,14 +27,19 @@ public class UserService {
         return createUser(name, "CUSTOMER");
     }
 
-    public User provisionCustomer(UUID verifiedSubject, String name) {
-        return userRepository.findById(verifiedSubject).orElseGet(() ->
+    public User provisionCustomer(String verifiedSubject, String name) {
+        return userRepository.findByExternalSubject(verifiedSubject).orElseGet(() ->
             userRepository.save(new User(
+                UUID.randomUUID(),
                 verifiedSubject,
                 name,
                 "CUSTOMER",
                 LocalDateTime.now()
             ))
         );
+    }
+
+    public User provisionCustomer(UUID verifiedSubject, String name) {
+        return provisionCustomer(verifiedSubject.toString(), name);
     }
 }

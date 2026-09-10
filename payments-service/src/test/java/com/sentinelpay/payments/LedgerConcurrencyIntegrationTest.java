@@ -16,22 +16,15 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 
-import com.sentinelpay.payments.domain.OutboxEvent;
-import com.sentinelpay.payments.domain.Payment;
-import com.sentinelpay.payments.domain.PaymentReservationStatus;
-import com.sentinelpay.payments.domain.PaymentStatus;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
-import com.sentinelpay.payments.repository.OutboxEventRepository;
-import com.sentinelpay.payments.repository.PaymentRepository;
-import com.sentinelpay.payments.repository.PaymentReservationRepository;
+import com.sentinelpay.payments.exception.WalletInsufficientBalanceException;
 import com.sentinelpay.payments.repository.WalletRepository;
 import com.sentinelpay.payments.service.PaymentService;
 import com.sentinelpay.payments.service.UserService;
 import com.sentinelpay.payments.service.WalletService;
-import com.sentinelpay.payments.service.outbox.OutboxMessage;
-import com.sentinelpay.payments.service.outbox.PaymentEventProcessor;
 
 @SpringBootTest
 class LedgerConcurrencyIntegrationTest extends AbstractIntegrationTest {
@@ -45,22 +38,13 @@ class LedgerConcurrencyIntegrationTest extends AbstractIntegrationTest {
     private PaymentService paymentService;
 
     @Autowired
-    private PaymentEventProcessor paymentEventProcessor;
-
-    @Autowired
-    private PaymentRepository paymentRepository;
-
-    @Autowired
-    private PaymentReservationRepository reservationRepository;
-
-    @Autowired
-    private OutboxEventRepository outboxEventRepository;
-
-    @Autowired
     private WalletRepository walletRepository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Test
-    void concurrentPendingPaymentsCannotOverReserveOneWallet()
+    void concurrentPaymentCreationCannotOverReserveOneWallet()
         throws Exception {
         User senderUser = userService.createCustomer("Reservation Sender");
         User receiverOneUser = userService.createCustomer("Receiver One");
@@ -75,23 +59,14 @@ class LedgerConcurrencyIntegrationTest extends AbstractIntegrationTest {
         sender.setBalance(new BigDecimal("100.00"));
         walletRepository.saveAndFlush(sender);
 
-        Payment firstPayment = paymentService.createPayment(
-            senderUser.getUserId(), sender.getId(), receiverOne.getId(),
-            new BigDecimal("75.00"), "AUD", "reserve-one",
-            UUID.randomUUID()
-        );
-        Payment secondPayment = paymentService.createPayment(
-            senderUser.getUserId(), sender.getId(), receiverTwo.getId(),
-            new BigDecimal("75.00"), "AUD", "reserve-two",
-            UUID.randomUUID()
-        );
-        OutboxMessage firstMessage = message(firstPayment);
-        OutboxMessage secondMessage = message(secondPayment);
-
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
-        Callable<Boolean> first = () -> process(firstMessage, ready, start);
-        Callable<Boolean> second = () -> process(secondMessage, ready, start);
+        Callable<Boolean> first = () -> create(
+            senderUser, sender, receiverOne, "reserve-one", ready, start
+        );
+        Callable<Boolean> second = () -> create(
+            senderUser, sender, receiverTwo, "reserve-two", ready, start
+        );
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         List<Boolean> outcomes;
@@ -108,46 +83,46 @@ class LedgerConcurrencyIntegrationTest extends AbstractIntegrationTest {
             executor.shutdownNow();
         }
 
-        Wallet updated = walletRepository.findById(sender.getId()).orElseThrow();
-        assertEquals(0, new BigDecimal("100.00").compareTo(updated.getBalance()));
+        BigDecimal balance = jdbcTemplate.queryForObject(
+            "select balance from wallets where id = ?", BigDecimal.class,
+            sender.getId()
+        );
+        BigDecimal reserved = jdbcTemplate.queryForObject(
+            "select reserved_balance from wallets where id = ?",
+            BigDecimal.class, sender.getId()
+        );
+        assertEquals(0, new BigDecimal("100.00").compareTo(balance));
         assertEquals(0, new BigDecimal("75.00")
-            .compareTo(updated.getReservedBalance()));
+            .compareTo(reserved));
         assertEquals(0, new BigDecimal("25.00")
-            .compareTo(updated.getAvailableBalance()));
-        assertEquals(1, reservationRepository.findAll().stream()
-            .filter(reservation -> reservation.getWallet().getId()
-                .equals(sender.getId()))
-            .filter(reservation -> reservation.getStatus() ==
-                PaymentReservationStatus.ACTIVE)
-            .count());
-        assertEquals(1, List.of(firstPayment.getId(), secondPayment.getId())
-            .stream()
-            .map(id -> paymentRepository.findById(id).orElseThrow())
-            .filter(payment -> payment.getStatus() == PaymentStatus.PROCESSING)
-            .count());
+            .compareTo(balance.subtract(reserved)));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "select count(*) from payment_reservations " +
+                "where wallet_id = ? and status = 'ACTIVE'",
+            Integer.class, sender.getId()
+        ));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "select count(*) from payments where sender_wallet_id = ?",
+            Integer.class, sender.getId()
+        ));
         assertEquals(1, outcomes.stream().filter(Boolean::booleanValue).count());
     }
 
-    private boolean process(OutboxMessage message, CountDownLatch ready,
-        CountDownLatch start) throws InterruptedException {
+    private boolean create(User senderUser, Wallet sender, Wallet receiver,
+        String reference, CountDownLatch ready, CountDownLatch start)
+        throws InterruptedException {
         ready.countDown();
         if (!start.await(5, TimeUnit.SECONDS)) {
-            throw new IllegalStateException("Concurrent processing did not start");
+            throw new IllegalStateException("Concurrent creation did not start");
         }
         try {
-            paymentEventProcessor.process(message);
+            paymentService.createPayment(
+                senderUser.getUserId(), sender.getId(), receiver.getId(),
+                new BigDecimal("75.00"), "AUD", reference, UUID.randomUUID()
+            );
             return true;
-        } catch (RuntimeException exception) {
+        } catch (WalletInsufficientBalanceException exception) {
             return false;
         }
-    }
-
-    private OutboxMessage message(Payment payment) {
-        OutboxEvent event = outboxEventRepository
-            .findOutboxEventsByAggregateId(payment.getId()).getFirst();
-        return new OutboxMessage(
-            event.getId(), event.getAggregateId(), event.getEventType(),
-            event.getCorrelationId(), event.getCreatedAt(), event.getPayload()
-        );
     }
 }

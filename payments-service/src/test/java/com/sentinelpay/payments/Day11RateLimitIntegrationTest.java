@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -25,6 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.repository.PostgresFixedWindowRateLimitRepository;
+import com.sentinelpay.payments.repository.WalletRepository;
 import com.sentinelpay.payments.service.PayeeCheckService;
 import com.sentinelpay.payments.service.RateLimitOperation;
 import com.sentinelpay.payments.service.UserService;
@@ -45,6 +47,7 @@ class Day11RateLimitIntegrationTest extends AbstractIntegrationTest {
     @Autowired private WalletService walletService;
     @Autowired private PayeeCheckService payeeCheckService;
     @Autowired private PostgresFixedWindowRateLimitRepository repository;
+    @Autowired private WalletRepository walletRepository;
 
     @Test
     void endpointLimitsReturnRetryAfterForBothOperations() throws Exception {
@@ -75,6 +78,8 @@ class Day11RateLimitIntegrationTest extends AbstractIntegrationTest {
         Wallet secondSender = walletService.createWallet(
             secondSenderUser.getUserId(), "AUD"
         );
+        secondSender.setBalance(new BigDecimal("100.00"));
+        walletRepository.saveAndFlush(secondSender);
         UUID checkId = payeeCheckService.createCheck(
             secondSenderUser.getUserId(), receiver.getId(), "Limited Receiver"
         ).getId();

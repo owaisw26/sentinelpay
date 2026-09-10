@@ -235,6 +235,28 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         );
     }
 
+    @ExceptionHandler(HeldPaymentNotFoundException.class)
+    public ProblemDetail handleHeldPaymentNotFound(
+        HeldPaymentNotFoundException exception
+    ) {
+        return problem(
+            HttpStatus.NOT_FOUND,
+            "HELD_PAYMENT_NOT_FOUND",
+            "Held payment not found"
+        );
+    }
+
+    @ExceptionHandler(HeldPaymentConflictException.class)
+    public ProblemDetail handleHeldPaymentConflict(
+        HeldPaymentConflictException exception
+    ) {
+        return problem(
+            HttpStatus.CONFLICT,
+            "HELD_PAYMENT_CONFLICT",
+            exception.getMessage()
+        );
+    }
+
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(
         MethodArgumentNotValidException exception,

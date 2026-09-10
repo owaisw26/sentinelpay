@@ -15,6 +15,7 @@ import com.sentinelpay.payments.controller.response.PayeeCheckResponse;
 import com.sentinelpay.payments.service.PayeeCheckService;
 import com.sentinelpay.payments.service.RateLimitOperation;
 import com.sentinelpay.payments.service.RateLimited;
+import com.sentinelpay.payments.security.AuthenticatedUserResolver;
 
 import jakarta.validation.Valid;
 
@@ -22,9 +23,12 @@ import jakarta.validation.Valid;
 @RequestMapping("/payee-checks")
 public class PayeeCheckController {
     private final PayeeCheckService payeeCheckService;
+    private final AuthenticatedUserResolver authenticatedUsers;
 
-    public PayeeCheckController(PayeeCheckService payeeCheckService) {
+    public PayeeCheckController(PayeeCheckService payeeCheckService,
+        AuthenticatedUserResolver authenticatedUsers) {
         this.payeeCheckService = payeeCheckService;
+        this.authenticatedUsers = authenticatedUsers;
     }
 
     @PostMapping
@@ -34,7 +38,7 @@ public class PayeeCheckController {
         @Valid @RequestBody PayeeCheckRequest request,
         Authentication authentication
     ) {
-        UUID userId = UUID.fromString(authentication.getName());
+        UUID userId = authenticatedUsers.resolve(authentication).getUserId();
         return PayeeCheckResponse.from(payeeCheckService.createCheck(
             userId, request.receiverWalletId(), request.suppliedName()
         ));

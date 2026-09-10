@@ -53,7 +53,7 @@ public class FakePaymentProvider implements PaymentProvider{
                 PaymentProviderLookupStatus.PENDING
             );
 
-            case MISSING_WEBHOOK_SUCCESS, DUPLICATE_WEBHOOK ->
+            case AUTO_SUCCESS, MISSING_WEBHOOK_SUCCESS, DUPLICATE_WEBHOOK ->
                 providerStatuses.put(
                     providerIdempotencyKey,
                     PaymentProviderLookupStatus.SUCCEEDED
@@ -114,6 +114,11 @@ public class FakePaymentProvider implements PaymentProvider{
         }
 
         switch (mode) {
+            case AUTO_SUCCESS -> deliverWebhook(
+                payment,
+                response,
+                PaymentProviderWebhookStatus.SUCCEEDED
+            );
             case DECLINE -> deliverWebhook(
                 payment,
                 response,

@@ -1,6 +1,7 @@
 package com.sentinelpay.payments.controller;
 
 import java.util.UUID;
+import java.util.List;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,6 +15,7 @@ import com.sentinelpay.payments.controller.request.WalletRequest;
 import com.sentinelpay.payments.controller.response.WalletResponse;
 import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.service.WalletService;
+import com.sentinelpay.payments.security.AuthenticatedUserResolver;
 
 import jakarta.validation.Valid;
 
@@ -21,9 +23,25 @@ import jakarta.validation.Valid;
 @RequestMapping("/wallets")
 public class WalletController {
     private final WalletService walletService;
+    private final AuthenticatedUserResolver authenticatedUsers;
 
-    public WalletController(WalletService walletService) {
+    public WalletController(WalletService walletService,
+        AuthenticatedUserResolver authenticatedUsers) {
         this.walletService = walletService;
+        this.authenticatedUsers = authenticatedUsers;
+    }
+
+    @GetMapping
+    public List<WalletResponse> listWallets(Authentication authentication) {
+        UUID userId = authenticatedUsers.resolve(authentication).getUserId();
+        return walletService.listWallets(userId).stream()
+            .map(wallet -> new WalletResponse(
+                wallet.getId(), wallet.getUser().getUserId(),
+                wallet.getCurrency(), wallet.getBalance(),
+                wallet.getReservedBalance(), wallet.getAvailableBalance(),
+                wallet.getCreatedAt()
+            ))
+            .toList();
     }
 
     @PostMapping
@@ -31,7 +49,7 @@ public class WalletController {
         @Valid @RequestBody WalletRequest walletRequest,
         Authentication authentication
     ) {
-        UUID userId = UUID.fromString(authentication.getName());
+        UUID userId = authenticatedUsers.resolve(authentication).getUserId();
         Wallet wallet =  walletService.createWallet(
                                           userId,
                                           walletRequest.currency());
@@ -50,7 +68,7 @@ public class WalletController {
         @PathVariable UUID walletId,
         Authentication authentication
     ) {
-        UUID userId = UUID.fromString(authentication.getName());
+        UUID userId = authenticatedUsers.resolve(authentication).getUserId();
         Wallet wallet = walletService.fetchWallet(walletId, userId);
         return new WalletResponse(wallet.getId(), 
                                   wallet.getUser().getUserId(), 

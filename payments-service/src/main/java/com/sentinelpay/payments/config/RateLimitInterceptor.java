@@ -9,6 +9,8 @@ import org.springframework.web.servlet.HandlerInterceptor;
 
 import com.sentinelpay.payments.service.RateLimitService;
 import com.sentinelpay.payments.service.RateLimited;
+import com.sentinelpay.payments.exception.UserNotFoundException;
+import com.sentinelpay.payments.repository.UserRepository;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -16,9 +18,12 @@ import jakarta.servlet.http.HttpServletResponse;
 @Component
 public class RateLimitInterceptor implements HandlerInterceptor {
     private final RateLimitService rateLimitService;
+    private final UserRepository userRepository;
 
-    public RateLimitInterceptor(RateLimitService rateLimitService) {
+    public RateLimitInterceptor(RateLimitService rateLimitService,
+        UserRepository userRepository) {
         this.rateLimitService = rateLimitService;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -38,8 +43,12 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if (principal == null) {
             return true;
         }
+        UUID internalUserId = userRepository
+            .findByExternalSubject(principal.getName())
+            .orElseThrow(UserNotFoundException::new)
+            .getUserId();
         rateLimitService.consume(
-            UUID.fromString(principal.getName()), rateLimited.value()
+            internalUserId, rateLimited.value()
         );
         return true;
     }

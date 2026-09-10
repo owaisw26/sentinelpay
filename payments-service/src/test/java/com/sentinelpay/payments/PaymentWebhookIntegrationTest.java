@@ -323,6 +323,46 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void autoSuccessModeEmitsOneSuccessWebhookAndSettles() {
+        User senderUser = userService.createUser("Auto Sender", "CUSTOMER");
+        User receiverUser = userService.createUser("Auto Receiver", "CUSTOMER");
+        Wallet sender = walletService.createWallet(senderUser.getUserId(), "AUD");
+        Wallet receiver = walletService.createWallet(receiverUser.getUserId(), "AUD");
+        sender.setBalance(new BigDecimal("100.00"));
+        walletRepository.saveAndFlush(sender);
+
+        BigDecimal amount = new BigDecimal("25.00");
+        Payment payment = paymentService.createPayment(
+            senderUser.getUserId(), sender.getId(), receiver.getId(), amount,
+            "AUD", "auto-success-" + UUID.randomUUID(), UUID.randomUUID()
+        );
+        OutboxEvent event = outboxEventRepository
+            .findOutboxEventsByAggregateId(payment.getId()).getFirst();
+        PaymentEventProcessor processor = new PaymentEventProcessor(
+            paymentProcessingService,
+            new FakePaymentProvider("AUTO_SUCCESS", paymentWebhookProcessor)
+        );
+
+        processor.process(toMessage(event));
+        entityManager.flush();
+        entityManager.clear();
+
+        Payment settled = paymentRepository.findById(payment.getId()).orElseThrow();
+        Wallet updatedSender = walletRepository.findById(sender.getId()).orElseThrow();
+        Wallet updatedReceiver = walletRepository.findById(receiver.getId()).orElseThrow();
+
+        assertEquals(PaymentStatus.SETTLED, settled.getStatus());
+        assertEquals(0, new BigDecimal("75.00").compareTo(updatedSender.getBalance()));
+        assertEquals(0, amount.compareTo(updatedReceiver.getBalance()));
+        assertEquals(1, webhookReceiptRepository.findAll().stream()
+            .filter(receipt -> receipt.getProviderPaymentId().equals(
+                settled.getProviderPaymentId()))
+            .findFirst()
+            .orElseThrow()
+            .getDeliveryCount());
+    }
+
+    @Test
     void contradictoryTerminalWebhookCreatesDiscrepancyWithoutReapplyingMoney() {
         User senderUser = userService.createUser("Contradiction Sender", "CUSTOMER");
         User receiverUser = userService.createUser("Contradiction Receiver", "CUSTOMER");

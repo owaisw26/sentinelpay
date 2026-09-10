@@ -1,4 +1,42 @@
-# React + TypeScript + Vite
+# SentinelPay dashboard
+
+One role-aware React SPA for customer payments and analyst operations. Customer
+and analyst route bundles are loaded separately, while the Java API remains the
+authorization boundary.
+
+## Local development
+
+Start PostgreSQL, LocalStack, and both backend services from the repository
+root. Start the payments service with the `local` profile and then run:
+
+```bash
+npm install
+npm run dev
+```
+
+Vite proxies `/api` to `http://localhost:8080`. The login page loads the
+local-only seeded customer and analyst personas. Tokens are held in memory and
+are lost on refresh.
+
+## Cognito mode
+
+Copy `.env.example`, set `VITE_AUTH_MODE=cognito`, and provide the values
+created by Terraform. Cognito uses Authorization Code with PKCE; the browser
+contains no client secret. Only the access token is sent to the Java API.
+
+## Checks
+
+```bash
+npm run build
+npm run lint
+npm audit --audit-level=high
+```
+
+The dashboard includes payment initiation and mismatch confirmation, payment
+status polling, held-case approval/blocking and audit, reconciliation, risk
+explanations, and AI rule proposal review.
+
+<!-- Vite template reference retained below for toolchain notes. -->
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

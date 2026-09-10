@@ -68,6 +68,9 @@ class AtomicIdempotencyConcurrencyIntegrationTest
         receiverUser = userService.createCustomer("Idempotent Receiver");
         sender = walletService.createWallet(senderUser.getUserId(), "AUD");
         receiver = walletService.createWallet(receiverUser.getUserId(), "AUD");
+        jdbcTemplate.update(
+            "update wallets set balance = 100.00 where id = ?", sender.getId()
+        );
         payeeCheckId = payeeCheckService.createCheck(
             senderUser.getUserId(), receiver.getId(), "Idempotent Receiver"
         ).getId();
@@ -122,6 +125,10 @@ class AtomicIdempotencyConcurrencyIntegrationTest
     @AfterEach
     void cleanUp() {
         if (paymentId != null) {
+            jdbcTemplate.update(
+                "delete from payment_reservations where payment_id = ?",
+                paymentId
+            );
             jdbcTemplate.update(
                 "delete from api_idempotency_records where payment_id = ?",
                 paymentId

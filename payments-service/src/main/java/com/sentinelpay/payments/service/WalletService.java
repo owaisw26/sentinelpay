@@ -3,6 +3,7 @@ package com.sentinelpay.payments.service;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.List;
 
 import org.springframework.stereotype.Service;
 
@@ -56,6 +57,10 @@ public class WalletService {
         } else {
             throw new WalletNotFoundException(walletId);
         }
+    }
+
+    public List<Wallet> listWallets(UUID userId) {
+        return walletRepository.findByUserUserIdOrderByCreatedAtAsc(userId);
     }
 
     public Wallet getWallet(UUID walletId) {

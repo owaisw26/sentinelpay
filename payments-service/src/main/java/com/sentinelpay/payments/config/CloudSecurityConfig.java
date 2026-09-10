@@ -28,7 +28,8 @@ public class CloudSecurityConfig {
     @Bean
     JwtDecoder cloudJwtDecoder(
         @Value("${sentinelpay.cloud.issuer}") String issuer,
-        @Value("${sentinelpay.cloud.audience}") String audience
+        @Value("${sentinelpay.cloud.audience}") String audience,
+        @Value("${sentinelpay.cloud.app-client-id}") String appClientId
     ) {
         NimbusJwtDecoder decoder = (NimbusJwtDecoder)
             JwtDecoders.fromIssuerLocation(issuer);
@@ -37,7 +38,9 @@ public class CloudSecurityConfig {
         OAuth2TokenValidator<Jwt> audienceValidator = audienceValidator(audience);
         decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
             issuerAndTime,
-            audienceValidator
+            audienceValidator,
+            claimValidator("token_use", "access"),
+            claimValidator("client_id", appClientId)
         ));
         return decoder;
     }
@@ -51,6 +54,19 @@ public class CloudSecurityConfig {
                     "Required audience is missing",
                     null
                 ));
+    }
+
+    static OAuth2TokenValidator<Jwt> claimValidator(
+        String claimName,
+        String expectedValue
+    ) {
+        return jwt -> expectedValue.equals(jwt.getClaimAsString(claimName))
+            ? OAuth2TokenValidatorResult.success()
+            : OAuth2TokenValidatorResult.failure(new OAuth2Error(
+                "invalid_token",
+                "Required " + claimName + " claim is missing or invalid",
+                null
+            ));
     }
 
     @Bean

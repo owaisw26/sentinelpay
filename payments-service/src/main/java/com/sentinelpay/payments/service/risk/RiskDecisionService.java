@@ -73,7 +73,10 @@ public class RiskDecisionService {
         switch (payload.action()) {
             case APPROVE -> approve(envelope, payment);
             case HOLD -> payment.transitionTo(PaymentStatus.HELD);
-            case BLOCK -> payment.transitionTo(PaymentStatus.BLOCKED);
+            case BLOCK -> {
+                ledgerService.releasePaymentIfPresent(payment);
+                payment.transitionTo(PaymentStatus.BLOCKED);
+            }
         }
         inboxRepository.markProcessed(
             envelope.eventId(), "APPLIED_" + payload.action().name()

@@ -41,6 +41,7 @@ public class PaymentService {
     private final OutboxEventRepository outboxEventRepository;
     private final ApiIdempotencyRepository idempotencyRepository;
     private final PayeeCheckService payeeCheckService;
+    private final LedgerService ledgerService;
     private final ObjectMapper objectMapper;
     private final boolean riskEnabled;
 
@@ -49,6 +50,7 @@ public class PaymentService {
         OutboxEventRepository outboxEventRepository,
         ApiIdempotencyRepository idempotencyRepository,
         PayeeCheckService payeeCheckService,
+        LedgerService ledgerService,
         ObjectMapper objectMapper,
         @Value("${sentinelpay.risk.enabled:true}") boolean riskEnabled) {
         this.paymentRepository = paymentRepository;
@@ -56,6 +58,7 @@ public class PaymentService {
         this.outboxEventRepository = outboxEventRepository;
         this.idempotencyRepository = idempotencyRepository;
         this.payeeCheckService = payeeCheckService;
+        this.ledgerService = ledgerService;
         this.objectMapper = objectMapper;
         this.riskEnabled = riskEnabled;
     }
@@ -88,8 +91,11 @@ public class PaymentService {
             return replay(userId, idempotencyKey, requestHash);
         }
 
-        Wallet sender = walletService.getWallet(senderWalletId);
-        Wallet receiver = walletService.getWallet(receiverWalletId);
+        LedgerService.PaymentWallets wallets = ledgerService.authorizePayment(
+            senderWalletId, receiverWalletId, amount, currency
+        );
+        Wallet sender = wallets.sender();
+        Wallet receiver = wallets.receiver();
 
         if (!sender.getUser().getUserId().equals(userId)) {
             throw new WalletNotFoundException(senderWalletId);
@@ -108,6 +114,7 @@ public class PaymentService {
             payeeCheck.getId(), payeeCheck.isMismatch()
         );
         payment = paymentRepository.saveAndFlush(payment);
+        ledgerService.reservePayment(payment);
 
         UUID correlationId = UUID.randomUUID();
         if (riskEnabled) {

@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.repository.PaymentRepository;
+import com.sentinelpay.payments.repository.PaymentReservationRepository;
+import com.sentinelpay.payments.repository.WalletRepository;
 import com.sentinelpay.payments.service.PayeeCheckService;
 import com.sentinelpay.payments.service.UserService;
 import com.sentinelpay.payments.service.WalletService;
@@ -43,6 +46,12 @@ class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private PaymentRepository paymentRepository;
+
+    @Autowired
+    private PaymentReservationRepository reservationRepository;
+
+    @Autowired
+    private WalletRepository walletRepository;
 
     @Autowired
     private PayeeCheckService payeeCheckService;
@@ -79,6 +88,15 @@ class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
 
         String paymentId = com.jayway.jsonpath.JsonPath.read(
             first.getResponse().getContentAsString(), "$.id"
+        );
+        assertTrue(reservationRepository.findById(UUID.fromString(paymentId))
+            .orElseThrow().isActive());
+        assertEquals(
+            0,
+            new BigDecimal("125.00").compareTo(
+                walletRepository.findById(fixture.sender().getId())
+                    .orElseThrow().getReservedBalance()
+            )
         );
         mockMvc.perform(get("/payments/{id}", paymentId)
                 .header(HttpHeaders.AUTHORIZATION,
@@ -153,6 +171,8 @@ class PaymentCreationIntegrationTest extends AbstractIntegrationTest {
         User receiverUser = userService.createCustomer("Payment Receiver");
         Wallet sender = walletService.createWallet(senderUser.getUserId(), "AUD");
         Wallet receiver = walletService.createWallet(receiverUser.getUserId(), "AUD");
+        sender.setBalance(new BigDecimal("1000.00"));
+        walletRepository.saveAndFlush(sender);
         UUID payeeCheckId = payeeCheckService.createCheck(
             senderUser.getUserId(), receiver.getId(), "Payment Receiver"
         ).getId();

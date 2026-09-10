@@ -190,6 +190,56 @@ class ReconciliationIntegrationTest extends AbstractIntegrationTest {
             .anyMatch(audit -> "RESOLUTION_RELEASE".equals(audit.getAction())));
     }
 
+    @Test
+    void ignoreCanCloseLegacyPaymentWithoutReservation() {
+        User senderUser = userService.createUser(
+            "Legacy Reconciliation Sender", "CUSTOMER"
+        );
+        User receiverUser = userService.createUser(
+            "Legacy Reconciliation Receiver", "CUSTOMER"
+        );
+        Wallet sender = walletService.createWallet(senderUser.getUserId(), "AUD");
+        Wallet receiver = walletService.createWallet(receiverUser.getUserId(), "AUD");
+        sender.setBalance(new BigDecimal("100.00"));
+        walletRepository.saveAndFlush(sender);
+
+        Payment payment = createProcessingPayment(
+            senderUser, sender, receiver, "legacy-missing-provider",
+            PaymentProviderLookupStatus.NOT_FOUND
+        );
+        entityManager.flush();
+        jdbcTemplate.update(
+            "delete from payment_reservations where payment_id = ?",
+            payment.getId()
+        );
+        jdbcTemplate.update(
+            "update wallets set reserved_balance = 0 where id = ?",
+            sender.getId()
+        );
+        jdbcTemplate.update(
+            "update payments set updated_at = updated_at - interval '10 minutes' "
+                + "where id = ?",
+            payment.getId()
+        );
+        entityManager.clear();
+
+        reconciliationDetector.run("analyst-legacy");
+        ReconciliationDiscrepancy discrepancy = open(payment.getId());
+        ReconciliationDiscrepancy resolved = resolutionService.resolve(
+            discrepancy.getId(),
+            discrepancy.getVersion(),
+            ReconciliationAction.IGNORE,
+            "Close pre-reservation local demo artifact",
+            UUID.randomUUID().toString(),
+            "analyst-legacy"
+        );
+
+        assertEquals(ReconciliationDiscrepancyStatus.IGNORED,
+            resolved.getStatus());
+        assertEquals(PaymentStatus.PROCESSING,
+            paymentRepository.findById(payment.getId()).orElseThrow().getStatus());
+    }
+
     private Payment createProcessingPayment(
         User senderUser,
         Wallet sender,

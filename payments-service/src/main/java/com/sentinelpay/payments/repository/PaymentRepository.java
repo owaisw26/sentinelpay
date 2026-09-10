@@ -15,6 +15,49 @@ import com.sentinelpay.payments.domain.Payment;
 import jakarta.persistence.LockModeType;
 
 public interface PaymentRepository extends JpaRepository<Payment, UUID>{
+    @Query("""
+        select p from Payment p
+        where p.senderWallet.user.userId = :userId
+        order by p.createdAt desc, p.id desc
+        """)
+    List<Payment> findCustomerPayments(
+        @Param("userId") UUID userId,
+        Pageable pageable
+    );
+
+    @Query("""
+        select p from Payment p
+        where p.senderWallet.user.userId = :userId
+          and (p.createdAt < :cursorCreatedAt
+            or (p.createdAt = :cursorCreatedAt and p.id < :cursorId))
+        order by p.createdAt desc, p.id desc
+        """)
+    List<Payment> findCustomerPaymentsAfter(
+        @Param("userId") UUID userId,
+        @Param("cursorCreatedAt") LocalDateTime cursorCreatedAt,
+        @Param("cursorId") UUID cursorId,
+        Pageable pageable
+    );
+
+    @Query("""
+        select p from Payment p
+        where p.status = com.sentinelpay.payments.domain.PaymentStatus.HELD
+        order by p.updatedAt desc, p.id desc
+        """)
+    List<Payment> findHeldPayments(Pageable pageable);
+
+    @Query("""
+        select p from Payment p
+        where p.status = com.sentinelpay.payments.domain.PaymentStatus.HELD
+          and (p.updatedAt < :cursorUpdatedAt
+            or (p.updatedAt = :cursorUpdatedAt and p.id < :cursorId))
+        order by p.updatedAt desc, p.id desc
+        """)
+    List<Payment> findHeldPaymentsAfter(
+        @Param("cursorUpdatedAt") LocalDateTime cursorUpdatedAt,
+        @Param("cursorId") UUID cursorId,
+        Pageable pageable
+    );
     @Query(("select p from Payment p where p.providerPaymentId = :providerPaymentId"))
     Optional<Payment> findByProviderPaymentId(@Param("providerPaymentId") String providerPaymentId);
 

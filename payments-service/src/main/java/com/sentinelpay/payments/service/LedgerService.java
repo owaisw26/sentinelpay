@@ -73,6 +73,27 @@ public class LedgerService {
     }
 
     @Transactional
+    public PaymentWallets authorizePayment(
+        UUID senderId,
+        UUID receiverId,
+        BigDecimal amount,
+        String currency
+    ) {
+        validateTransfer(senderId, receiverId, amount);
+        LockedWallets wallets = lockWallets(senderId, receiverId);
+        if (!currency.equals(wallets.sender().getCurrency()) ||
+            !currency.equals(wallets.receiver().getCurrency())) {
+            throw new InvalidTransferException(
+                "Payment currency must match both wallet currencies"
+            );
+        }
+        if (wallets.sender().getAvailableBalance().compareTo(amount) < 0) {
+            throw new WalletInsufficientBalanceException(senderId, amount);
+        }
+        return new PaymentWallets(wallets.sender(), wallets.receiver());
+    }
+
+    @Transactional
     public void reservePayment(Payment payment) {
         UUID senderId = payment.getSenderWallet().getId();
         UUID receiverId = payment.getReceiverWallet().getId();
@@ -146,6 +167,32 @@ public class LedgerService {
         validateReservation(payment, sender, reservation);
         sender.releaseReservation(reservation.getAmount());
         reservation.release(LocalDateTime.now());
+    }
+
+    /**
+     * Releases a reservation when one exists. The optional form keeps
+     * pre-authorization payments created before reservation-at-creation was
+     * introduced resolvable after a rolling deployment.
+     */
+    @Transactional
+    public boolean releasePaymentIfPresent(Payment payment) {
+        UUID senderId = payment.getSenderWallet().getId();
+        Wallet sender = walletRepository.findByIdForUpdate(senderId)
+            .orElseThrow(() -> new WalletNotFoundException(senderId));
+        PaymentReservation reservation = paymentReservationRepository
+            .findByPaymentIdForUpdate(payment.getId())
+            .orElse(null);
+
+        if (reservation == null) {
+            return false;
+        }
+        validateReservationIdentity(payment, sender, reservation);
+        if (!reservation.isActive()) {
+            return false;
+        }
+        sender.releaseReservation(reservation.getAmount());
+        reservation.release(LocalDateTime.now());
+        return true;
     }
 
     private void validateTransfer(
@@ -270,15 +317,25 @@ public class LedgerService {
         Wallet sender,
         PaymentReservation reservation
     ) {
+        validateReservationIdentity(payment, sender, reservation);
+        if (!reservation.isActive()) {
+            throw new IllegalStateException("Payment reservation is not active");
+        }
+    }
+
+    private void validateReservationIdentity(
+        Payment payment,
+        Wallet sender,
+        PaymentReservation reservation
+    ) {
         if (!reservation.getWallet().getId().equals(sender.getId()) ||
             reservation.getAmount().compareTo(payment.getAmount()) != 0 ||
             !reservation.getCurrency().equals(payment.getCurrency())) {
             throw new IllegalStateException("Payment reservation does not match payment");
         }
-        if (!reservation.isActive()) {
-            throw new IllegalStateException("Payment reservation is not active");
-        }
     }
+
+    public record PaymentWallets(Wallet sender, Wallet receiver) {}
 
     private record LockedWallets(Wallet sender, Wallet receiver) {}
 }

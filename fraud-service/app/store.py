@@ -72,7 +72,6 @@ class PostgresRiskStore:
                        OR (aggregate_id = %s AND event_type = %s
                            AND aggregate_sequence = %s)
                        OR payment_id = %s
-                    FOR SHARE
                     """,
                     (
                         event.event_id,

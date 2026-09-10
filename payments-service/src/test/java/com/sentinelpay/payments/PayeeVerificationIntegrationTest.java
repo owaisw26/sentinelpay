@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -27,6 +28,7 @@ import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.domain.PayeeCheckOutcome;
 import com.sentinelpay.payments.repository.PayeeCheckRepository;
+import com.sentinelpay.payments.repository.WalletRepository;
 import com.sentinelpay.payments.security.PayloadHasher;
 import com.sentinelpay.payments.service.PayeeCheckService;
 import com.sentinelpay.payments.service.UserService;
@@ -46,6 +48,7 @@ class PayeeVerificationIntegrationTest extends AbstractIntegrationTest {
     @Autowired private PayeeCheckService payeeCheckService;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private PayeeCheckRepository payeeCheckRepository;
+    @Autowired private WalletRepository walletRepository;
     @PersistenceContext private EntityManager entityManager;
 
     @Test
@@ -137,6 +140,8 @@ class PayeeVerificationIntegrationTest extends AbstractIntegrationTest {
         Wallet otherSender = walletService.createWallet(
             otherUser.getUserId(), "AUD"
         );
+        otherSender.setBalance(new BigDecimal("100.00"));
+        walletRepository.saveAndFlush(otherSender);
         Fixture other = new Fixture(
             otherUser, otherSender, fixture.receiver(),
             issueToken(otherUser.getUserId())
@@ -230,6 +235,8 @@ class PayeeVerificationIntegrationTest extends AbstractIntegrationTest {
         Wallet receiver = walletService.createWallet(
             receiverUser.getUserId(), "AUD"
         );
+        sender.setBalance(new BigDecimal("100.00"));
+        walletRepository.saveAndFlush(sender);
         return new Fixture(
             senderUser, sender, receiver, issueToken(senderUser.getUserId())
         );

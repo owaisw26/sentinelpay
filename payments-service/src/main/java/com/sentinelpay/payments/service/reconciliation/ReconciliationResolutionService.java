@@ -91,9 +91,7 @@ public class ReconciliationResolutionService {
             .orElseThrow(ReconciliationNotFoundException::new);
         PaymentReservation reservation = reservationRepository
             .findByPaymentIdForUpdate(payment.getId())
-            .orElseThrow(() -> new ReconciliationConflictException(
-                "Payment reservation is missing"
-            ));
+            .orElse(null);
 
         PaymentProviderLookupResult provider = paymentProvider.lookupPayment(
             payment.getId()
@@ -108,9 +106,9 @@ public class ReconciliationResolutionService {
         }
 
         if (requestedAction != ReconciliationAction.IGNORE &&
-            !reservation.isActive()) {
+            (reservation == null || !reservation.isActive())) {
             throw new ReconciliationConflictException(
-                "Payment reservation is already final"
+                "Payment reservation is missing or already final"
             );
         }
 

@@ -19,6 +19,7 @@ import org.springframework.test.annotation.DirtiesContext;
 
 import com.sentinelpay.payments.domain.OutboxEvent;
 import com.sentinelpay.payments.domain.Payment;
+import com.sentinelpay.payments.domain.PaymentReservationStatus;
 import com.sentinelpay.payments.domain.PaymentStatus;
 import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
@@ -51,12 +52,15 @@ class RiskDecisionIntegrationTest extends AbstractIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
-    void approvalIsAppliedOnceAndReservesBeforeProviderWorkIsEmitted() {
+    void approvalIsAppliedOnceAndUsesCreationTimeReservation() {
         Payment payment = payment();
         OutboxEvent screening = screeningEvent(payment);
         RiskDecisionEnvelope approval = decision(
             payment, screening, 1, RiskAction.APPROVE
         );
+        assertEquals(PaymentReservationStatus.ACTIVE,
+            reservationRepository.findById(payment.getId()).orElseThrow()
+                .getStatus());
 
         riskDecisionService.apply(approval);
         riskDecisionService.apply(approval);
@@ -108,6 +112,14 @@ class RiskDecisionIntegrationTest extends AbstractIntegrationTest {
         OutboxEvent screening = screeningEvent(payment);
         riskDecisionService.apply(decision(
             payment, screening, 1, RiskAction.BLOCK
+        ));
+
+        assertEquals(PaymentReservationStatus.RELEASED,
+            reservationRepository.findById(payment.getId()).orElseThrow()
+                .getStatus());
+        assertEquals(0, BigDecimal.ZERO.compareTo(
+            walletRepository.findById(payment.getSenderWallet().getId())
+                .orElseThrow().getReservedBalance()
         ));
 
         riskDecisionService.apply(decision(

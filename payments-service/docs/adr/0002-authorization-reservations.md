@@ -19,10 +19,17 @@ Two designs were considered:
 
 ## Decision
 
-Use authorization reservations. `wallet.balance` remains posted balance and
-`wallet.reserved_balance` is the total amount unavailable to new payments. Each
-payment has at most one durable reservation with an `ACTIVE`, `CAPTURED`, or
-`RELEASED` status.
+Use authorization reservations. The payment-creation transaction locks the
+wallets and creates the reservation before the payment enters risk screening.
+An amount above the sender's available balance is rejected immediately and no
+payment or screening event is committed. `wallet.balance` remains posted
+balance and `wallet.reserved_balance` is the total amount unavailable to new
+payments. Each payment has at most one durable reservation with an `ACTIVE`,
+`CAPTURED`, or `RELEASED` status.
+
+The reservation remains active while a payment is screening or held for analyst
+review. Approval reuses the existing reservation, settlement captures it, and
+blocking or provider failure releases it.
 
 The invariants are:
 

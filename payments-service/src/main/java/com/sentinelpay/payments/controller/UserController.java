@@ -32,7 +32,7 @@ public class UserController {
             authentication instanceof AnonymousAuthenticationToken
             ? userService.createCustomer(requestBody.name())
             : userService.provisionCustomer(
-                java.util.UUID.fromString(authentication.getName()),
+                authentication.getName(),
                 requestBody.name()
             );
         return UserResponse.from(user);

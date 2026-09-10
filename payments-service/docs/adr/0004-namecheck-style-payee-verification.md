@@ -26,7 +26,7 @@ data.
   uses locale-independent case folding, normalizes punctuation and whitespace,
   and removes a bounded set of terminal business suffixes.
 - Canonical equality produces `MATCH`.
-- A compatible token/initial structure with Jaro-Winkler similarity of at least
+- A compatible token/initial structure with similarity of at least
   `0.90` produces `CLOSE_MATCH`. All other comparisons produce `NO_MATCH`.
 - Return only the check ID, coarse outcome, non-revealing reason code, and
   expiry. Do not return the registered name, supplied name, component-level

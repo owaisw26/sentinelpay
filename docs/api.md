@@ -35,4 +35,3 @@ Example response:
   "amount": 100.00,
   "currency": "AUD"
 }
-
