@@ -45,7 +45,6 @@ import com.sentinelpay.payments.domain.User;
 import com.sentinelpay.payments.domain.Wallet;
 import com.sentinelpay.payments.provider.FakePaymentProvider;
 import com.sentinelpay.payments.provider.PaymentProviderResponse;
-import com.sentinelpay.payments.provider.PaymentProviderTimeoutException;
 import com.sentinelpay.payments.exception.ProviderAttemptInProgressException;
 import com.sentinelpay.payments.repository.OutboxEventRepository;
 import com.sentinelpay.payments.repository.PaymentRepository;
