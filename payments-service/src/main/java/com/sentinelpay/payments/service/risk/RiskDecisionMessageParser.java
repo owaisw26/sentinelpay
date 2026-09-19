@@ -21,11 +21,11 @@ public class RiskDecisionMessageParser {
             );
         }
         if (document.has("Type")) {
-            if (!"Notification".equals(document.path("Type").asText()) ||
-                !document.path("Message").isTextual()) {
+            if (!"Notification".equals(document.path("Type").asString()) ||
+                !document.path("Message").isString()) {
                 throw new IllegalArgumentException("Unsupported SNS message");
             }
-            document = objectMapper.readTree(document.path("Message").asText());
+            document = objectMapper.readTree(document.path("Message").asString());
         }
         RiskDecisionEnvelope envelope = objectMapper.treeToValue(
             document, RiskDecisionEnvelope.class
