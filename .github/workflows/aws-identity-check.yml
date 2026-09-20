@@ -1,0 +1,25 @@
+name: Verify AWS OIDC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    name: Verify protected AWS identity
+    runs-on: ubuntu-latest
+    environment: aws-demo
+
+    steps:
+      - name: Configure short-lived AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: sentinelpay-github-${{ github.run_id }}
+
+      - name: Verify caller identity
+        run: aws sts get-caller-identity
