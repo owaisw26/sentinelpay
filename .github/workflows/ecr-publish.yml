@@ -1,0 +1,90 @@
+name: Build and publish server images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sentinelpay-ecr-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, scan, and publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: aws-demo
+
+    steps:
+      - name: Check out the exact commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build payments image for ECS
+        run: docker build --platform linux/amd64 --tag sentinelpay-payments:scan ./payments-service
+
+      - name: Build fraud image for ECS
+        run: docker build --platform linux/amd64 --tag sentinelpay-fraud:scan ./fraud-service
+
+      - name: Scan payments image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: sentinelpay-payments:scan
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          scanners: vuln
+          severity: CRITICAL,HIGH
+
+      - name: Scan fraud image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: sentinelpay-fraud:scan
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          scanners: vuln
+          severity: CRITICAL,HIGH
+
+      - name: Configure short-lived AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: '798862885514'
+          role-session-name: sentinelpay-ecr-${{ github.run_id }}
+
+      - name: Log Docker in to ECR
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          registry="798862885514.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          aws ecr get-login-password --region "$AWS_REGION" |
+            docker login --username AWS --password-stdin "$registry"
+
+      - name: Push immutable commit-tagged images
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          registry="798862885514.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          tag="sha-${GITHUB_SHA}"
+
+          for service in payments fraud; do
+            repository="sentinelpay/${service}"
+            image="${registry}/${repository}:${tag}"
+            docker tag "sentinelpay-${service}:scan" "$image"
+            docker push "$image"
+
+            digest="$(aws ecr describe-images \
+              --repository-name "$repository" \
+              --image-ids "imageTag=${tag}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text)"
+            echo "${repository}: ${image}@${digest}" >> "$GITHUB_STEP_SUMMARY"
+          done
