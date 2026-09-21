@@ -16,10 +16,15 @@ import org.testcontainers.utility.DockerImageName;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.sns.model.CreateTopicRequest;
+import software.amazon.awssdk.services.sns.model.SetSubscriptionAttributesRequest;
+import software.amazon.awssdk.services.sns.model.SubscribeRequest;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.GetQueueAttributesRequest;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
+import software.amazon.awssdk.services.sqs.model.SetQueueAttributesRequest;
 
 @ActiveProfiles("test")
 abstract class AbstractIntegrationTest {
@@ -32,26 +37,35 @@ abstract class AbstractIntegrationTest {
     private static final LocalStackContainer LOCALSTACK =
         new LocalStackContainer(
             DockerImageName.parse("localstack/localstack:4.14.0")
-        ).withServices(LocalStackContainer.Service.SQS);
+        ).withServices(
+            LocalStackContainer.Service.SNS,
+            LocalStackContainer.Service.SQS
+        );
 
     private static String paymentQueueUrl;
+    private static String paymentTopicArn;
 
     static {
         Startables.deepStart(Stream.of(POSTGRES, LOCALSTACK)).join();
         paymentQueueUrl = createPaymentQueue("payment-events");
+        paymentTopicArn = createPaymentTopic(
+            "payment-events", paymentQueueUrl
+        );
     }
 
     @DynamicPropertySource
     static void registerInfrastructure(DynamicPropertyRegistry registry) {
         registerInfrastructure(
             registry,
-            AbstractIntegrationTest::paymentQueueUrl
+            AbstractIntegrationTest::paymentQueueUrl,
+            AbstractIntegrationTest::paymentTopicArn
         );
     }
 
     protected static void registerInfrastructure(
         DynamicPropertyRegistry registry,
-        Supplier<Object> queueUrl
+        Supplier<Object> queueUrl,
+        Supplier<Object> topicArn
     ) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
@@ -65,16 +79,41 @@ abstract class AbstractIntegrationTest {
             "sentinelpay.sqs.payment-events-url",
             queueUrl
         );
+        registry.add(
+            "sentinelpay.sns.payment-events-topic-arn",
+            topicArn
+        );
     }
 
     protected static String paymentQueueUrl() {
         return paymentQueueUrl;
     }
 
+    protected static String paymentTopicArn() {
+        return paymentTopicArn;
+    }
+
     protected static SqsClient newSqsClient() {
         return SqsClient.builder()
             .endpointOverride(
                 LOCALSTACK.getEndpointOverride(LocalStackContainer.Service.SQS)
+            )
+            .region(Region.of(LOCALSTACK.getRegion()))
+            .credentialsProvider(
+                StaticCredentialsProvider.create(
+                    AwsBasicCredentials.create(
+                        LOCALSTACK.getAccessKey(),
+                        LOCALSTACK.getSecretKey()
+                    )
+                )
+            )
+            .build();
+    }
+
+    protected static SnsClient newSnsClient() {
+        return SnsClient.builder()
+            .endpointOverride(
+                LOCALSTACK.getEndpointOverride(LocalStackContainer.Service.SNS)
             )
             .region(Region.of(LOCALSTACK.getRegion()))
             .credentialsProvider(
@@ -119,6 +158,60 @@ abstract class AbstractIntegrationTest {
                     ))
                     .build()
             ).queueUrl();
+        }
+    }
+
+    protected static String createPaymentTopic(
+        String topicNamePrefix,
+        String queueUrl
+    ) {
+        String suffix = UUID.randomUUID().toString();
+        try (
+            SqsClient sqs = newSqsClient();
+            SnsClient sns = newSnsClient()
+        ) {
+            String queueArn = sqs.getQueueAttributes(
+                GetQueueAttributesRequest.builder()
+                    .queueUrl(queueUrl)
+                    .attributeNames(QueueAttributeName.QUEUE_ARN)
+                    .build()
+            ).attributes().get(QueueAttributeName.QUEUE_ARN);
+            String topicArn = sns.createTopic(
+                CreateTopicRequest.builder()
+                    .name(topicNamePrefix + "-" + suffix)
+                    .build()
+            ).topicArn();
+            String queuePolicy = """
+                {"Version":"2012-10-17","Statement":[{"Effect":"Allow",\
+                "Principal":{"Service":"sns.amazonaws.com"},\
+                "Action":"sqs:SendMessage","Resource":"%s",\
+                "Condition":{"ArnEquals":{"aws:SourceArn":"%s"}}}]}
+                """.formatted(queueArn, topicArn).replace("\n", "");
+            sqs.setQueueAttributes(
+                SetQueueAttributesRequest.builder()
+                    .queueUrl(queueUrl)
+                    .attributes(Map.of(QueueAttributeName.POLICY, queuePolicy))
+                    .build()
+            );
+            String subscriptionArn = sns.subscribe(
+                SubscribeRequest.builder()
+                    .topicArn(topicArn)
+                    .protocol("sqs")
+                    .endpoint(queueArn)
+                    .attributes(Map.of("RawMessageDelivery", "true"))
+                    .returnSubscriptionArn(true)
+                    .build()
+            ).subscriptionArn();
+            sns.setSubscriptionAttributes(
+                SetSubscriptionAttributesRequest.builder()
+                    .subscriptionArn(subscriptionArn)
+                    .attributeName("FilterPolicy")
+                    .attributeValue(
+                        "{\"eventType\":[\"PAYMENT_CREATED\",\"PAYMENT_APPROVED\"]}"
+                    )
+                    .build()
+            );
+            return topicArn;
         }
     }
 }

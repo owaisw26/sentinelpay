@@ -44,6 +44,10 @@ import com.sentinelpay.payments.service.WalletService;
 class SchedulingIntegrationTest {
     private static final String SCHEDULING_QUEUE_URL =
         AbstractIntegrationTest.createPaymentQueue("payment-events-scheduling");
+    private static final String SCHEDULING_TOPIC_ARN =
+        AbstractIntegrationTest.createPaymentTopic(
+            "payment-events-scheduling", SCHEDULING_QUEUE_URL
+        );
 
     @DynamicPropertySource
     static void registerSchedulingInfrastructure(
@@ -51,7 +55,8 @@ class SchedulingIntegrationTest {
     ) {
         AbstractIntegrationTest.registerInfrastructure(
             registry,
-            () -> SCHEDULING_QUEUE_URL
+            () -> SCHEDULING_QUEUE_URL,
+            () -> SCHEDULING_TOPIC_ARN
         );
     }
 

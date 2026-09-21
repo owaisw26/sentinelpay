@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -16,6 +17,9 @@ from app.store import (
     PostgresRiskStore,
     apply_migrations,
 )
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def build_worker():
@@ -55,21 +59,49 @@ def build_worker():
         boto3.client("sns", **client_options),
         topic_arn,
     )
-    return consumer, store, publisher, PostgresRuleProposalStore(connection)
+    return (
+        consumer,
+        store,
+        publisher,
+        PostgresRuleProposalStore(connection),
+        connection,
+    )
 
 
 def main() -> None:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-    consumer, store, publisher, rule_store = build_worker()
     anomaly_model = _load_anomaly_model()
+    reconnect_seconds = max(
+        1, int(os.getenv("FRAUD_RECONNECT_SECONDS", "2"))
+    )
     while True:
-        consumer.poll_once()
-        pipeline = RiskEvaluationPipeline(
-            anomaly_model=anomaly_model,
-            dynamic_ruleset=rule_store.active_ruleset().dynamic_ruleset(),
-        )
-        store.finalize_due(pipeline)
-        publisher.publish_batch()
+        connection = None
+        try:
+            from botocore.exceptions import BotoCoreError, ClientError
+            from psycopg import OperationalError
+
+            consumer, store, publisher, rule_store, connection = build_worker()
+            while True:
+                consumer.poll_once()
+                pipeline = RiskEvaluationPipeline(
+                    anomaly_model=anomaly_model,
+                    dynamic_ruleset=(
+                        rule_store.active_ruleset().dynamic_ruleset()
+                    ),
+                )
+                store.finalize_due(pipeline)
+                publisher.publish_batch()
+        except (BotoCoreError, ClientError, OperationalError) as error:
+            LOGGER.warning(
+                "worker dependency unavailable; failureType=%s; "
+                "retrySeconds=%s",
+                type(error).__name__,
+                reconnect_seconds,
+            )
+        finally:
+            if connection is not None:
+                connection.close()
+        time.sleep(reconnect_seconds)
 
 
 def _load_anomaly_model() -> IsolationForestAnomalyModel:

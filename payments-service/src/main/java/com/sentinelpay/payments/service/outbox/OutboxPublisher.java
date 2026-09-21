@@ -1,6 +1,7 @@
 package com.sentinelpay.payments.service.outbox;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -9,17 +10,17 @@ import org.springframework.stereotype.Service;
 
 import com.sentinelpay.payments.domain.OutboxEvent;
 
-import software.amazon.awssdk.services.sqs.SqsClient;
-import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
+import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.sns.model.MessageAttributeValue;
+import software.amazon.awssdk.services.sns.model.PublishRequest;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class OutboxPublisher {
     private final OutboxClaimService outboxClaimService;
-    private final SqsClient sqsClient;
+    private final SnsClient snsClient;
     private final ObjectMapper objectMapper;
-    private final String queueUrl;
-    private final String fraudQueueUrl;
+    private final String topicArn;
     private final int batchSize;
     private final long leaseSeconds;
     private final long retryBaseMillis;
@@ -27,21 +28,18 @@ public class OutboxPublisher {
 
     public OutboxPublisher(
         OutboxClaimService outboxClaimService,
-        SqsClient sqsClient,
+        SnsClient snsClient,
         ObjectMapper objectMapper,
-        @Value("${sentinelpay.sqs.payment-events-url}") String queueUrl,
-        @Value("${sentinelpay.sqs.fraud-events-url:${sentinelpay.sqs.payment-events-url}}")
-            String fraudQueueUrl,
+        @Value("${sentinelpay.sns.payment-events-topic-arn}") String topicArn,
         @Value("${sentinelpay.outbox.batch-size:50}") int batchSize,
         @Value("${sentinelpay.outbox.lease-seconds:30}") long leaseSeconds,
         @Value("${sentinelpay.outbox.retry-base-ms:1000}") long retryBaseMillis,
         @Value("${sentinelpay.outbox.retry-max-ms:300000}") long retryMaxMillis
     ) {
         this.outboxClaimService = outboxClaimService;
-        this.sqsClient = sqsClient;
+        this.snsClient = snsClient;
         this.objectMapper = objectMapper;
-        this.queueUrl = queueUrl;
-        this.fraudQueueUrl = fraudQueueUrl;
+        this.topicArn = topicArn;
         this.batchSize = batchSize;
         this.leaseSeconds = leaseSeconds;
         this.retryBaseMillis = retryBaseMillis;
@@ -77,12 +75,17 @@ public class OutboxPublisher {
 
                 String messageBody = objectMapper.writeValueAsString(message);
 
-                SendMessageRequest request = SendMessageRequest.builder()
-                    .queueUrl(destinationFor(event))
-                    .messageBody(messageBody)
+                PublishRequest request = PublishRequest.builder()
+                    .topicArn(topicArn)
+                    .message(messageBody)
+                    .messageAttributes(Map.of(
+                        "eventType", stringAttribute(event.getEventType()),
+                        "schemaVersion", numberAttribute(event.getSchemaVersion()),
+                        "traceparent", stringAttribute(traceparent(event))
+                    ))
                     .build();
 
-                sqsClient.sendMessage(request);
+                snsClient.publish(request);
                 outboxClaimService.complete(event.getId(), event.getLeaseToken());
             } catch (RuntimeException failure) {
                 try {
@@ -106,10 +109,25 @@ public class OutboxPublisher {
         }
     }
 
-    private String destinationFor(OutboxEvent event) {
-        return "PAYMENT_SCREENING_REQUESTED".equals(event.getEventType())
-            ? fraudQueueUrl
-            : queueUrl;
+    private MessageAttributeValue stringAttribute(String value) {
+        return MessageAttributeValue.builder()
+            .dataType("String")
+            .stringValue(value)
+            .build();
+    }
+
+    private MessageAttributeValue numberAttribute(int value) {
+        return MessageAttributeValue.builder()
+            .dataType("Number")
+            .stringValue(Integer.toString(value))
+            .build();
+    }
+
+    private String traceparent(OutboxEvent event) {
+        String traceId = event.getCorrelationId().toString().replace("-", "");
+        String spanId = event.getId().toString().replace("-", "")
+            .substring(0, 16);
+        return "00-" + traceId + "-" + spanId + "-01";
     }
 
     private long retryDelayMillis(int attemptCount) {

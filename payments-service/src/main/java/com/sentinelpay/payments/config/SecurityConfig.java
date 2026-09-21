@@ -70,7 +70,10 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
 
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers(
+                    "/actuator/health",
+                    "/actuator/health/**"
+                ).permitAll()
                 .requestMatchers("/actuator/**").hasAuthority("ANALYST")
                 .requestMatchers("/dev/**").permitAll()
                 .requestMatchers("/users").permitAll()

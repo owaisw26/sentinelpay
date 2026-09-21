@@ -63,6 +63,8 @@ import com.sentinelpay.payments.service.outbox.PaymentEventProcessor;
 import com.sentinelpay.payments.service.outbox.PaymentProcessingService;
 
 import jakarta.transaction.Transactional;
+import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.sns.model.SnsException;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
@@ -73,7 +75,6 @@ import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
-import software.amazon.awssdk.services.sqs.model.SqsException;
 import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest
@@ -664,7 +665,7 @@ public class OutboxPublisherIntegrationTests extends AbstractIntegrationTest {
 
         try {
             assertThrows(
-                SqsException.class,
+                SnsException.class,
                 outboxPublisher::publishBatch
             );
 
@@ -860,6 +861,10 @@ public class OutboxPublisherIntegrationTests extends AbstractIntegrationTest {
         return newSqsClient();
     }
 
+    private static SnsClient createLocalStackSnsClient() {
+        return newSnsClient();
+    }
+
     private void awaitConsumerAttempts(
         PaymentEventConsumer consumer,
         RecordingTimeoutPaymentProvider provider,
@@ -998,15 +1003,6 @@ public class OutboxPublisherIntegrationTests extends AbstractIntegrationTest {
                 SqsClient.class.getClassLoader(),
                 new Class<?>[] { SqsClient.class },
                 (proxy, method, arguments) -> {
-                    if (
-                        method.getName().equals("sendMessage")
-                            && failureControl.publishingFails.get()
-                    ) {
-                        throw SqsException.builder()
-                            .message("Forced SQS publishing failure")
-                            .build();
-                    }
-
                     if (method.getName().equals("receiveMessage")) {
                         failureControl.receiveLock.readLock().lock();
                         try {
@@ -1031,8 +1027,30 @@ public class OutboxPublisherIntegrationTests extends AbstractIntegrationTest {
             );
         }
 
+        @Bean
+        @Primary
+        SnsClient faultInjectingSnsClient(SqsFailureControl failureControl) {
+            SnsClient delegate = createLocalStackSnsClient();
+
+            return (SnsClient) Proxy.newProxyInstance(
+                SnsClient.class.getClassLoader(),
+                new Class<?>[] { SnsClient.class },
+                (proxy, method, arguments) -> {
+                    if (
+                        method.getName().equals("publish")
+                            && failureControl.publishingFails.get()
+                    ) {
+                        throw SnsException.builder()
+                            .message("Forced SNS publishing failure")
+                            .build();
+                    }
+                    return invokeDelegate(delegate, method, arguments);
+                }
+            );
+        }
+
         private static Object invokeDelegate(
-            SqsClient delegate,
+            Object delegate,
             java.lang.reflect.Method method,
             Object[] arguments
         ) throws Throwable {

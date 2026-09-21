@@ -89,7 +89,10 @@ public class CloudSecurityConfig {
         http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers(
+                    "/actuator/health",
+                    "/actuator/health/**"
+                ).permitAll()
                 .requestMatchers("/webhooks/psp").permitAll()
                 .requestMatchers("/actuator/**").hasAuthority("ANALYST")
                 .anyRequest().authenticated()
